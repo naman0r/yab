@@ -3869,7 +3869,7 @@ struct SideRow: View {
                 WatchWords(tab: tab)
                 // A page on this Mac's own server: which port (DevMode.swift).
                 if showsDevPort {
-                    DevPort(tab: tab, hovering: hovering, gap: 8, speaker: false)
+                    DevPort(tab: tab, hovering: hovering, gap: 8, speaker: false, unkeeps: closes)
                 }
             }
         }
