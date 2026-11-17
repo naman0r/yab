@@ -1319,7 +1319,8 @@ struct ContentView: View {
                         browser: browser, tab: tab, peek: browser.peek, strip: !browser.prefs.sidebar,
                         height: AddressBar.height(sidebar: browser.prefs.sidebar, carded: laid), corner: corner,
                         half: split, doors: side != .left,
-                        columnDoor: side != .right, leadingInset: margins.leading,
+                        // Of two halves, the one on the column's side.
+                        columnDoor: side != (browser.flank == .right ? .left : .right), leadingInset: margins.leading,
                         leave: split ? { [browser, id = tab.id] in browser.leaveSplit(id) } : nil
                     )
                     .toned(worn)
