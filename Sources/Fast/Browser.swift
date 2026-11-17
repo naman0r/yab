@@ -216,6 +216,14 @@ final class Browser: NSObject, ObservableObject, Relaying {
             // In mail: its page, or one of the space's tabs (MailTabRows).
             if inMail { mailFollows() }
             findFollows(left: oldValue)
+            // Hide Elements points at one page, and ends with it. Left on,
+            // its bar stood over a page nothing pointed at, Esc there
+            // turned it off on the wrong tab, and the page left went on
+            // hiding whatever was clicked, with no bar to say so.
+            if veiling {
+                veiling = false
+                tab(id: oldValue)?.stopPicking()
+            }
             // Developer Tools are the tab's (DevTools.swift).
             devFollows(left: oldValue)
             // The tab just left is the tab just looked at. Whether a tab has
