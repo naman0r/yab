@@ -922,6 +922,11 @@ final class Brim {
         kept[ObjectIdentifier(window)]?.pressed(at: pointer)
     }
 
+    /// A look at the bench's pointer now, as a move or a tick would take.
+    static func benchLook(in window: NSWindow) {
+        kept[ObjectIdentifier(window)]?.moved()
+    }
+
     private init(_ window: NSWindow, browser: Browser) {
         self.window = window
         self.browser = browser
@@ -1173,6 +1178,11 @@ final class Brim {
                                 frame: window.frame, pointer: pointer, top: Brim.top(under: pointer),
                                 own: Set(([window] + (window.childWindows ?? [])).map(\.windowNumber))) else {
             cancelRest()
+            // A rest at the top edge from before counts for nothing when
+            // the pointer comes back to it: the strip waits a whole rest.
+            stripResting = nil
+            stripLook?.cancel()
+            stripLook = nil
             letGo(behind: browser)
             return
         }
