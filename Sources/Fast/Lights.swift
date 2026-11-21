@@ -687,6 +687,22 @@ enum EdgeReach {
         return !holds(window) && !holds(screen)
     }
 
+    /// Out past the edge, the pointer is over another window there: an
+    /// app's tiled beside this one, or another of Yab's (#1024). Going over
+    /// to it is leaving, as going over to another display is (`away`), not
+    /// reaching the edge. The desktop's own windows sit below the normal
+    /// level, and out past the edge over the desktop still reaches it
+    /// (#607). `top` is the number of the topmost window under the pointer,
+    /// `own` the window's and its child windows', and `level` a window's
+    /// level by its number; asked only out past the edge.
+    static func onAnother(_ point: CGPoint, top: @autoclosure () -> Int, own: @autoclosure () -> Set<Int>,
+                          level: (Int) -> Int?) -> Bool {
+        guard point.x < 0 else { return false }
+        let number = top()
+        guard number != 0, !own().contains(number), let level = level(number) else { return false }
+        return level >= Int(CGWindowLevelForKey(.normalWindow))
+    }
+
     /// The pointer keeps a column brought out as a card: over it, or within
     /// `reach` of the window's left edge, as a hand drifting off the card's
     /// other side may go, or anywhere past that edge beside the window, as
@@ -1113,6 +1129,17 @@ final class Brim {
         NSWindow.windowNumber(at: pointer, belowWindowWithWindowNumber: 0)
     }
 
+    /// A window's level by its number, any app's, or nil once it is gone.
+    private static func level(of number: Int) -> Int? {
+        let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(number)) as? [[String: Any]]
+        return info?.first?[kCGWindowLayer as String] as? Int
+    }
+
+    /// The window's number and its child windows'.
+    private static func own(_ window: NSWindow) -> Set<Int> {
+        Set(([window] + (window.childWindows ?? [])).map(\.windowNumber))
+    }
+
     /// The pointer is on another window and this one is not in front: the
     /// column and the strip it had out over the page go back, unless
     /// something hangs from them or a button is held, a drag on its way
@@ -1176,7 +1203,7 @@ final class Brim {
         let front = window.isKeyWindow || window.isMainWindow || Brim.benchFront
         guard EdgeReach.watches(front: front, onScreen: window.isVisible && window.occlusionState.contains(.visible),
                                 frame: window.frame, pointer: pointer, top: Brim.top(under: pointer),
-                                own: Set(([window] + (window.childWindows ?? [])).map(\.windowNumber))) else {
+                                own: Brim.own(window)) else {
             cancelRest()
             // A rest at the top edge from before counts for nothing when
             // the pointer comes back to it: the strip waits a whole rest.
@@ -1353,7 +1380,10 @@ final class Brim {
                 // top is the menu bar's and macOS's lights', and the lights
                 // are in sight in a window: only the edge.
                 let belowMenu = !full || (!browser.menuOut && fromTop > menu)
-                if over || away || here.y < 0 || here.y > frame.height {
+                // Out past the edge over another window, tiled beside this
+                // one: gone over to it, not to the edge (#1024).
+                if over || away || here.y < 0 || here.y > frame.height
+                    || EdgeReach.onAnother(here, top: Brim.top(under: pointer), own: Brim.own(window), level: Brim.level(of:)) {
                     past = false
                 } else if EdgeReach.wall(here, last: last, height: frame.height) {
                     past = true

@@ -247,6 +247,30 @@ struct LightsEdgeTests {
         #expect(inside && asked == 1)
     }
 
+    /// #1024: out past the edge over another window, an app's tiled beside
+    /// this one or another of Yab's, is not the edge. Over the desktop,
+    /// whose windows sit below the normal level, it still is (#607).
+    @Test func anotherWindowBesideTheEdgeIsNotTheEdge() {
+        let past = CGPoint(x: -40, y: 300)
+        // An app's window, a floating panel, and the desktop's own window.
+        let levels = [9: 0, 12: 3, 56: -2_147_483_603]
+        func onAnother(_ top: Int, own: Set<Int> = [7]) -> Bool {
+            EdgeReach.onAnother(past, top: top, own: own, level: { levels[$0] })
+        }
+        #expect(onAnother(9))
+        #expect(onAnother(12))
+        #expect(!onAnother(56))
+        // A child window of its own, nothing there, a window gone since.
+        #expect(!onAnother(8, own: [7, 8]))
+        #expect(!onAnother(0))
+        #expect(!onAnother(11))
+        // Inside the window the window server is asked nothing.
+        var asked = 0
+        func top() -> Int { asked += 1; return 9 }
+        let inside = EdgeReach.onAnother(CGPoint(x: 1, y: 300), top: top(), own: [7], level: { levels[$0] })
+        #expect(!inside && asked == 0)
+    }
+
     @Test func pageControlsInTheCornerNeverRevealTheColumn() {
         for x in [CGFloat(4), 8, 12, 20, 38, 60] {
             for y in [CGFloat(8), 24, 40, 300] {
