@@ -5,7 +5,7 @@ import SwiftUI
 import WebKit
 
 /// A web view that reads the two-finger swipe for itself.
-final class PageView: WKWebView, NSTextContent {
+final class PageView: QuietWebView, NSTextContent {
     // Retained here because WebKit holds its navigation delegate weakly.
     let navigationEvents = WebKitPageEvents()
     let stateObservation = WebKitPageState()
@@ -1330,36 +1330,11 @@ final class PageView: WKWebView, NSTextContent {
         if let onStep { onStep(forward) } else if forward { goForward() } else { goBack() }
     }
 
-    // MARK: - keys the page didn't use
+    // MARK: - keys the page didn't use (QuietWebView keeps them quiet)
 
-    /// The last key handed to the page. WebKit sends a key the page didn't
-    /// use back up the responder chain, the same event, a second time,
-    /// where nothing takes it and macOS plays its "can't do that" sound.
-    /// Editors that put the text in themselves (X's reply box, anything built
-    /// on Draft.js) leave WebKit thinking their keys unused, so typing into
-    /// them beeped. Safari keeps those quiet, and so does this view. The
-    /// app's own shortcuts never get this far: its key monitor takes them
-    /// before the page sees the key.
-    private var handed: NSEvent?
-    /// How many came back unused and were kept quiet, for the bench.
-    static var quieted = 0
-
-    /// Arrows, Home, End and the page keys carry function flags, so AppKit
-    /// offers them as key equivalents first, and WebKit takes them for the
-    /// page there, never in `keyDown`. One the page leaves unused (a player
-    /// that seeks on its own keydown without preventDefault, a page with
-    /// nowhere to scroll) comes back to `keyDown` all the same, so it is
-    /// marked as handed here too. Only a key WebKit took: one it passes on
-    /// still reaches `keyDown` for the first time. ⌘ and ⌃ are left to beep
-    /// as anywhere else when nothing has them.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         recordWindowInput(event)
-        let taken = super.performKeyEquivalent(with: event)
-        if taken, event.type == .keyDown, window?.firstResponder === self,
-           event.modifierFlags.isDisjoint(with: [.command, .control]) {
-            handed = event
-        }
-        return taken
+        return super.performKeyEquivalent(with: event)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -1367,12 +1342,6 @@ final class PageView: WKWebView, NSTextContent {
         clearMenuOpen()
         if !PageView.agentActing { PageView.person?(self); RelayGuard.felt(self); lastInput = event.timestamp }
         PageView.reached?(self)
-        if let handed, PageView.same(handed, event) {
-            self.handed = nil
-            PageView.quieted += 1
-            return
-        }
-        handed = event
         super.keyDown(with: event)
     }
 
@@ -1383,12 +1352,6 @@ final class PageView: WKWebView, NSTextContent {
     /// and Chrome keep the window as it is; a page's own full screen (a
     /// video's) still ends on Escape, which WebKit handles itself.
     override func cancelOperation(_ sender: Any?) {}
-
-    /// The same key press: the event WebKit sends back is the one it was
-    /// given, and no two presses share a timestamp.
-    static func same(_ one: NSEvent, _ other: NSEvent) -> Bool {
-        one === other || (one.timestamp == other.timestamp && one.keyCode == other.keyCode && one.type == other.type)
-    }
 
     // MARK: - two fingers sideways
 

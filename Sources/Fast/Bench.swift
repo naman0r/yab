@@ -8003,7 +8003,8 @@ final class Bench {
             // all, queued for its window the way a hand's arrive, and how
             // many reached the end of the window's responder chain unused,
             // each one a beep (Beeps). `url`: that page opened in front
-            // first, its tab's id in the answer. A --test run only: it types
+            // first, its tab's id in the answer. `popup`: on the extension
+            // popup that is open instead. A --test run only: it types
             // into the page.
             guard Store.testing else { answer(["error": "page-keys only works on a --test run, it would type into your page"]); return }
             Beeps.watch()
@@ -8012,10 +8013,12 @@ final class Bench {
                 answer(["id": tab.id.uuidString])
                 return
             }
-            guard let tab = browser.active, let window = tab.page.window else { answer(["error": "no page in front"]); return }
+            let popup = request["popup"] as? Bool == true
+            let view: NSView? = popup ? ExtensionPopup.shared.view : browser.active?.page
+            guard let view, let window = view.window else { answer(["error": popup ? "no popup open" : "no page in front"]); return }
             NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            if request["focus"] as? Bool ?? true { window.makeFirstResponder(tab.page) }
+            if popup { window.makeKey() } else { window.makeKeyAndOrderFront(nil) }
+            if request["focus"] as? Bool ?? true { window.makeFirstResponder(view) }
             let names = request["keys"] as? [String] ?? []
             let beeps = Beeps.count, quieted = PageView.quieted, before = browser.active?.id
             for name in names {
@@ -8032,7 +8035,7 @@ final class Bench {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + (request["wait"] as? Double ?? 1.0)) {
                 answer(["beeps": Beeps.count - beeps, "quieted": PageView.quieted - quieted,
-                        "tabChanged": browser.active?.id != before, "key": NSApp.keyWindow === window,
+                        "tabChanged": browser.active?.id != before, "key": window.isKeyWindow,
                         "responder": (window.firstResponder).map { "\(type(of: $0))" } ?? "none",
                         "window": "\(type(of: window))"])
             }
