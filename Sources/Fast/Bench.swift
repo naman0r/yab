@@ -562,7 +562,7 @@ final class Bench {
                 return windows.indices.contains(number - 1) ? windows[number - 1].browser : nil
             } : nil
         }
-        guard let browser = windowBrowser ?? browser else {
+        guard let browser = windowBrowser ?? browser.map(BrowserWindows.shared.live) else {
             answer(["error": "no browser"])
             return
         }
@@ -9693,9 +9693,14 @@ final class Bench {
         guard let ref = (request["id"] as? String)?.lowercased(), !ref.isEmpty else { return nil }
         // A small window's page too, by the id `links` gives.
         // And one parked in another space, as a video out across spaces.
-        return browser.tabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
-            ?? browser.parkedTabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
-            ?? browser.outside.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
+        func look(_ browser: Browser) -> Tab? {
+            browser.tabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
+                ?? browser.parkedTabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
+                ?? browser.outside.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
+        }
+        // And one in another window: a task's own tabs stay in the first
+        // window when it closes, and its calls go to the one in front (#819).
+        return look(browser) ?? BrowserWindows.shared.browsers.lazy.compactMap(look).first
     }
 
     @available(macOS 15.4, *)

@@ -358,6 +358,15 @@ final class BrowserWindows: ObservableObject {
 
     var canReopen: Bool { !shown.closed.isEmpty || closedFirst != nil }
 
+    /// The window an agent's tools work in: `kept`, the one the bench took
+    /// at launch, unless it was closed while another is up. A closed first
+    /// window keeps its tabs out of sight, and with today's tabs in every
+    /// window those are stale copies of the ones on screen (#819).
+    func live(_ kept: Browser) -> Browser {
+        guard closedAt[kept.windowID ?? Self.primaryID] != nil else { return kept }
+        return activeBrowser ?? kept
+    }
+
     /// `near`: the window it was asked from, the one in front if none.
     @discardableResult
     private func open(id: UUID, restoring: Bool, frame placed: NSRect? = nil, near: NSWindow? = nil, purpose: BrowserWindowPurpose = .normal) -> Browser {
