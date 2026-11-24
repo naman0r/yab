@@ -840,6 +840,17 @@ public final class Journal: @unchecked Sendable {
         }
     }
 
+    /// A conflict, merged already, goes again on top of the version the
+    /// server gave, even one below this device's (a server behind its
+    /// journal answers any other base with the same conflict). Dirty stays
+    /// as the merge left it.
+    public func conflicted(_ key: Record.Key, version: Int64) throws {
+        try queue.sync {
+            guard let had = load(key) else { return }
+            try save(had.record, dirty: had.dirty, version: version)
+        }
+    }
+
     // MARK: SQLite
 
     private struct Row { var record: Record; var dirty: Bool; var version: Int64 }
