@@ -1109,7 +1109,11 @@ final class Tab: ObservableObject, Identifiable, Relaying {
         retainingEngineTitle = false
         title = ""
         Favicons.shared.navigationStarted(for: self)
-        icon = Tab.ownIcon(url) ?? url.flatMap(Favicons.shared.pageIcon)
+        // No destination yet: a reload or a woken tab, still on the page
+        // its icon belongs to (#735). Another page's address, when it
+        // arrives, comes back here with it.
+        guard let url else { return }
+        icon = Tab.ownIcon(url) ?? Favicons.shared.pageIcon(url)
     }
 
     /// Both engines commit a new document, even though their history and
