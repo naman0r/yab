@@ -153,6 +153,9 @@ final class Agents: ObservableObject {
         /// Your own words for the messages still to go, oldest first: its
         /// chat shows them in place of the prompt wrapped around them.
         var saying: [String] = []
+        /// Of `saying`, those sent and not yet heard back: the last
+        /// `queue.count` wait in the queue, not sent until it lets them go.
+        var unheard: Int { max(0, saying.count - queue.count) }
         /// Words steered into the turn going on, not yet heard back: they
         /// stand in that turn, not in one of their own.
         var steering = 0
