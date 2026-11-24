@@ -562,7 +562,7 @@ final class Bench {
                 return windows.indices.contains(number - 1) ? windows[number - 1].browser : nil
             } : nil
         }
-        guard let browser = windowBrowser ?? browser.map(BrowserWindows.shared.live) else {
+        guard let browser = windowBrowser ?? browser.map({ holder(of: request, in: BrowserWindows.shared.live($0)) }) else {
             answer(["error": "no browser"])
             return
         }
@@ -9693,14 +9693,18 @@ final class Bench {
         guard let ref = (request["id"] as? String)?.lowercased(), !ref.isEmpty else { return nil }
         // A small window's page too, by the id `links` gives.
         // And one parked in another space, as a video out across spaces.
-        func look(_ browser: Browser) -> Tab? {
-            browser.tabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
-                ?? browser.parkedTabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
-                ?? browser.outside.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
-        }
-        // And one in another window: a task's own tabs stay in the first
-        // window when it closes, and its calls go to the one in front (#819).
-        return look(browser) ?? BrowserWindows.shared.browsers.lazy.compactMap(look).first
+        return browser.tabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
+            ?? browser.parkedTabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
+            ?? browser.outside.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
+    }
+
+    /// The window a call works in: `browser`, or the one holding the tab it
+    /// names when that is another. A task's own tabs stay in the first
+    /// window when it closes, while its calls go to the one in front (#819),
+    /// and what a verb does to a tab's window must be done to its own.
+    func holder(of request: [String: Any], in browser: Browser) -> Browser {
+        guard find(request, in: browser) == nil else { return browser }
+        return BrowserWindows.shared.browsers.first { find(request, in: $0) != nil } ?? browser
     }
 
     @available(macOS 15.4, *)

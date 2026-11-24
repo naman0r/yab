@@ -67,11 +67,19 @@ struct AgentLiveWindowTests {
         }
     }
 
-    /// A task at work in the first window when it closed still reaches its tab.
-    @Test func aTabInTheClosedFirstWindowIsStillFoundByID() throws {
-        try closingTheFirst { first, _, stale in
-            let live = BrowserWindows.shared.live(first)
-            #expect(Bench().find(["id": Bench.short(stale)], in: live) === stale)
+    /// A task at work in the first window when it closed still reaches its
+    /// tab, and what it does there is done in that window, not the one in front.
+    @Test func aTabInTheClosedFirstWindowIsWorkedInItsOwnWindow() throws {
+        try closingTheFirst { first, second, stale in
+            let request: [String: Any] = ["id": Bench.short(stale)]
+            let front = second.activeID
+            let browser = Bench().holder(of: request, in: BrowserWindows.shared.live(first))
+            #expect(browser === first)
+            let tab = try #require(Bench().find(request, in: browser))
+            #expect(tab === stale)
+            // As the select verb does with the tab it found.
+            browser.select(tab)
+            #expect(second.activeID == front)
         }
     }
 }
