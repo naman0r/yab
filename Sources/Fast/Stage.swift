@@ -1515,13 +1515,17 @@ final class StageView: NSView {
         // stepping aside lays the stage out again that same moment, and
         // taking the page back then left the screen black with the sound
         // still playing. WebKit brings it back itself on the way out.
-        if let web = wanted as? WKWebView, web.fullscreenState != .notInFullscreen {
-            stopFollowing()
-            return
-        }
         // A Chromium page's own full screen lends it to a window of Yab's
         // own the same way (ChromiumPage+Media.swift).
-        if let page = wanted as? ChromiumPage, page.media.fullscreen {
+        let lent: Bool = if let web = wanted as? WKWebView { web.fullscreenState != .notInFullscreen }
+            else { (wanted as? ChromiumPage)?.media.fullscreen == true }
+        if lent {
+            // Another tab's page still here would show under this tab's
+            // name (#937). WebKit's placeholder, the docked inspector and
+            // the page stepping off stay.
+            for view in subviews where view !== wanted && view !== leaving && (view is WKWebView && !Self.isInspector(view) || view is ChromiumPage) {
+                view.removeFromSuperview()
+            }
             stopFollowing()
             return
         }
