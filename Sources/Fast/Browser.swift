@@ -8721,9 +8721,9 @@ final class Browser: NSObject, ObservableObject, Relaying {
         let target: URL?
         if ending != nil {
             // The words the ending finished are a place's name in the list,
-            // its address without scheme or port: read back alone, a machine
-            // known by one word (nas) is no address, and localhost is the
-            // server on port 80, not the one on 3000 its row opens (#761).
+            // its address without its scheme: read back alone, a machine
+            // known by one word (nas) is no address, and a server its row
+            // opens over http, dev.test:3000, would be tried over https (#761).
             let place = query.lead.flatMap { lead in
                 offers.indices.contains(lead) && offers[lead].isPlace && offers[lead].key == completed.lowercased() ? offers[lead].url : nil
             }

@@ -67,13 +67,14 @@ enum Address {
     }
 
     /// What the field finished, read back as an address. History names a
-    /// place without its scheme or port (`pretty`), so the words alone lose
-    /// them: `place`, the one they finished, gives a bare name its address
-    /// and a server its port back.
+    /// place without its scheme, and without a port that is the scheme's own
+    /// (`History.key`), so the words alone lose them: `place`, the one they
+    /// finished, gives a bare name its address and a server its scheme and
+    /// port back.
     static func finished(_ words: String, place: URL?) -> URL? {
         guard let url = url(from: words) else { return place }
         func bare(_ host: String?) -> String? { host.map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 } }
-        guard let place, let port = place.port, url.port == nil, bare(url.host()) == bare(place.host()),
+        guard let place, let port = place.port, url.port == nil || url.port == port, bare(url.host()) == bare(place.host()),
               var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
         parts.scheme = place.scheme
         parts.host = place.host()

@@ -32,9 +32,9 @@ struct FieldBareNameTests {
     }
 
     /// A bare name, with and without a port, and a server whose name is an
-    /// address by itself but whose port the words leave out.
-    @Test(arguments: [("http://yabnas/", "yabn", "yabnas"), ("http://yabnas:5000/", "yabn", "yabnas"),
-                      ("http://yabdev761.test:3000/", "yabd", "yabdev761.test"), ("https://yabdev761.test:8443/", "yabd", "yabdev761.test")])
+    /// address by itself but whose scheme the words leave out.
+    @Test(arguments: [("http://yabnas/", "yabn", "yabnas"), ("http://yabnas:5000/", "yabn", "yabnas:5000"),
+                      ("http://yabdev761.test:3000/", "yabd", "yabdev761.test:3000"), ("https://yabdev761.test:8443/", "yabd", "yabdev761.test:8443")])
     func returnGoesWhereTheRowTheFieldFinishedGoes(address: String, typed: String, whole: String) throws {
         try withBrowser { browser in
             let place = try #require(URL(string: address))
@@ -59,8 +59,9 @@ struct FieldBareNameTests {
         #expect(Address.finished("yabnas", place: nil) == nil)
         // A place on the web's own port adds nothing, and its query is not brought along.
         #expect(Address.finished("example.com/docs", place: URL(string: "https://example.com/docs?page=2")) == URL(string: "https://example.com/docs"))
-        // Another machine's port is not this one's.
+        // Another machine's port, or another port typed, is not this one's.
         #expect(Address.finished("example.com", place: URL(string: "http://other.test:8080/")) == URL(string: "https://example.com"))
+        #expect(Address.finished("example.com:3000", place: URL(string: "http://example.com:4000/")) == URL(string: "https://example.com:3000"))
         #expect(Address.finished("example.com/docs", place: URL(string: "http://www.example.com:8080/docs")) == URL(string: "http://www.example.com:8080/docs"))
     }
 }
