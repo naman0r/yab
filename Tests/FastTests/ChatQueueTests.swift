@@ -39,16 +39,19 @@ struct ChatQueueTests {
         #expect(session.queue == ["Q1", "Q2"])
         #expect(session.saying == ["Q1", "Q2"])
         #expect(session.carrying == [[], []] && session.attaching == [[], []])
+        #expect(session.sends == 1, "sent, and heard back at once, it follows them down")
     }
 
-    @Test func queueingIsNotSending() throws {
+    @Test func queueingIsNotSendingButTheQueueLettingOneGoIs() throws {
         let (agents, session, done) = try running()
         defer { done() }
         agents.followUp(session.id, "Q1", queue: true)
         agents.followUp(session.id, "Q2", queue: true)
-        #expect(session.unheard == 0, "queued words do not move the transcript")
-        // As the turn's end lets the first go (Agents.turned).
-        session.queue.removeFirst()
-        #expect(session.unheard == 1, "sent from the queue, it follows them down")
+        #expect(session.sends == 0, "queued words do not move the transcript")
+        // The turn ends: the queue lets Q1 go and Claude Code says it back at once (Agents.turned).
+        agents.hear(["type": "result", "subtype": "success", "is_error": false, "result": "Done.", "session_id": "S"], on: session)
+        #expect(session.items.last { $0.kind == .asked }?.text == "Q1")
+        #expect(session.queue == ["Q2"] && session.saying == ["Q2"])
+        #expect(session.sends == 1, "sent from the queue, it follows them down")
     }
 }

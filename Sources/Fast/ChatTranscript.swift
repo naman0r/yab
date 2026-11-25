@@ -92,7 +92,7 @@ struct ChatTranscript: View {
 
     var body: some View {
         // Queued words wait over the field: only a send follows them down.
-        let sent = Agents.shared.session(chat.id)?.unheard ?? 0
+        let sent = Agents.shared.session(chat.id)?.sends ?? 0
         ScrollViewReader { reader in
             ThreadScrollView(.vertical) {
                 VStack(spacing: 0) {
