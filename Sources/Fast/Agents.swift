@@ -153,6 +153,13 @@ final class Agents: ObservableObject {
         /// Your own words for the messages still to go, oldest first: its
         /// chat shows them in place of the prompt wrapped around them.
         var saying: [String] = []
+        /// Messages sent, heard back or not: the transcript follows each
+        /// down. The last `queue.count` of `saying` wait in the queue, not
+        /// sent until it lets them go; Claude Code says one back the moment
+        /// it goes, so those heard back are counted too.
+        var sends: Int { echoed + max(0, saying.count - queue.count) }
+        /// Of `saying`, those heard back since this session was made.
+        var echoed = 0
         /// Words steered into the turn going on, not yet heard back: they
         /// stand in that turn, not in one of their own.
         var steering = 0
@@ -654,6 +661,7 @@ final class Agents: ObservableObject {
             session.resent -= 1
             return
         }
+        if !session.saying.isEmpty { session.echoed += 1 }
         let words = session.saying.isEmpty ? Agents.unsaid(text) : session.saying.removeFirst()
         var item = ChatItem(id: UUID().uuidString, kind: .asked, text: words, state: .done)
         if !session.carrying.isEmpty { item.detail = session.carrying.removeFirst().joined(separator: "\n") }
@@ -3644,6 +3652,7 @@ final class Agents: ObservableObject {
                     continue
                 }
                 // What it was told, said back: in your words.
+                if item.kind == .asked, !session.saying.isEmpty { session.echoed += 1 }
                 if item.kind == .asked { item.text = session.saying.isEmpty ? Agents.unsaid(item.text) : session.saying.removeFirst() }
                 if item.kind == .asked, !session.carrying.isEmpty { item.detail = session.carrying.removeFirst().joined(separator: "\n") }
                 if item.kind == .asked, !session.attaching.isEmpty { session.sent[item.id] = session.attaching.removeFirst() }

@@ -307,7 +307,8 @@ struct TabGalleryLayer: View {
         .frame(width: rect.width, height: rect.height)
         .glassEffect(isPrivate ? GlassTone.privateTab.glass(for: .dark) : .regular, in: Circle())
         .glassEffectTransition(.identity)
-        .opacity(app.surfaces.chromeOpacity)
+        // The iPad has no stack on its page: its All Tabs is in the sidebar.
+        .opacity(app.workspace.tabletControls ? 0 : app.surfaces.chromeOpacity)
         .position(x: rect.midX, y: rect.midY + offset)
         .allowsHitTesting(false)
         .accessibilityHidden(true)

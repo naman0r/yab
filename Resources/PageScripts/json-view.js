@@ -326,10 +326,18 @@
       return out || '$';
     }
 
+    // `.owner.login`, `.topics[3]`, `.["$schema"]`; `.` for the whole. jq
+    // takes a name after a dot only when it is letters, digits and `_`: a
+    // `$` there starts a variable, so `.$schema` doesn't run.
     function jq(p) {
-      var t = pathText(p);
-      if (t === '$') return '.';
-      return t.charAt(0) === '[' ? '.' + t : '.' + t;
+      var out = '';
+      for (var i = 0; i < p.length; i++) {
+        var k = p[i];
+        if (typeof k === 'number') out += '[' + k + ']';
+        else if (/^[A-Za-z_]\w*$/.test(k)) out += '.' + k;
+        else out += '[' + JSON.stringify(k) + ']';
+      }
+      return out.charAt(0) === '.' ? out : '.' + out;
     }
 
     function child(n, k) {

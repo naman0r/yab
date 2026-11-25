@@ -331,6 +331,7 @@ public final class SyncClient: @unchecked Sendable {
                 }
             }
             take(conflicts)
+            for (record, version) in conflicts { try? journal.conflicted(record, version: version) }
             if !sent.isEmpty, !full.isEmpty { freed = true }
             for item in message["rejected"] as? [[String: Any]] ?? [] {
                 guard let name = item["name"] as? String else { continue }

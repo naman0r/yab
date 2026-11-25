@@ -39,9 +39,9 @@ extension SyncBridge {
         let local = ids.local(copy), firstLocal = ids.local(SyncCollection.firstSpace)
         guard let space = app.browser.space(local), !space.isPrivate, space.folders.isEmpty,
               let target = app.browser.space(firstLocal) else { return false }
-        let merged = Self.merged(space, into: target)
+        let merged = Self.merged(space, into: target, home: pinHome)
         // What stays behind is blank tabs only. A pin the first space already
-        // has at its address isn't merged (merged) and goes with the copy.
+        // has, saved at the same address, isn't merged (merged) and goes with the copy.
         var left = space
         left.pins = space.pins.filter(Self.isBlank)
         left.kept = space.kept.filter { if case let .tab(tab) = $0 { return Self.isBlank(tab) }; return false }

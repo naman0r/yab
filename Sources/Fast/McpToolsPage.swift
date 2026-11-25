@@ -482,7 +482,8 @@ extension Mcp {
     /// Errors that are about reaching Yab, not about the page: the same
     /// call again gets the same answer.
     static func unreached(_ error: String) -> Bool {
-        error == BenchCaller.refusal || error == "This task's permission expired."
+        error == BenchCaller.refusal || error == ContextConsent.unavailable
+            || error.hasPrefix("This task's permission expired.")
             || ["Yab isn't running", "Yab is open, but agents are off", "Agents are off in Yab"].contains { error.hasPrefix($0) }
     }
 

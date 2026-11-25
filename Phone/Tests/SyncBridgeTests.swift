@@ -1035,6 +1035,31 @@ final class SyncBridgeTests: XCTestCase {
         app.sync.end()
     }
 
+    /// The copy's pin and the first space's are on the same page now, a
+    /// sign-in page, but were saved at different ones: they are two pins,
+    /// and the copy's goes into the first space with its saved address.
+    func testTheSecondPersonalsPinSavedElsewhereIsKept() async throws {
+        let server = SyncMemoryServer(), seal = Seal.make()
+        let (mac, copy, profile) = try await brokenJoin(server, seal)
+        var theirs = try XCTUnwrap(mac.row(copy).pins.first { $0.url == Broken.pinned })
+        theirs.home = "https://example.org/docs"
+        try mac.write(SyncCollection.tab, theirs.id, theirs.fields)
+        var firsts = try XCTUnwrap(mac.row(first).pins.first { $0.url == Broken.pinned })
+        firsts.home = "https://example.org/mail"
+        try mac.write(SyncCollection.tab, firsts.id, firsts.fields)
+        _ = await until { mac.pending == 0 }
+        let app = await relaunch(server, profile)
+        let repaired = await until(8) {
+            !mac.journal.living(SyncCollection.space).contains { $0.id == copy } && mac.pending == 0
+        }
+        XCTAssertTrue(repaired, "\(spaceNames(mac))")
+        await settle(mac, app)
+        let pins = mac.row(first).pins
+        XCTAssertEqual(pins.map(\.id).sorted(), [firsts.id, theirs.id].sorted(), "\(pins.map(\.url))")
+        XCTAssertEqual(pins.first { $0.id == theirs.id }?.home, "https://example.org/docs", "its saved address goes with it")
+        app.sync.end()
+    }
+
     /// Two iPhones and a Mac: the second iPhone took the copy in, then was
     /// away while the first repaired it. Back with its stale journal, it
     /// tidies after the repair: no tab is lost and the copy stays gone.
@@ -1435,7 +1460,7 @@ final class SyncBridgeTests: XCTestCase {
         let pin = Tab(id: "pin", title: "Example", site: "Example", icon: "example", url: "https://example.com")
         let start = Space(id: "local", name: "Personal", emoji: "", tint: RGB(1, 2, 3), pins: [pin], current: pin.id)
         let first = Space(id: "first", name: "Personal", emoji: "", tint: RGB(1, 2, 3))
-        let merged = SyncBridge.merged(start, into: first)
+        let merged = SyncBridge.merged(start, into: first, home: \.url)
         XCTAssertEqual(merged.pins.map(\.id), [pin.id])
         XCTAssertEqual(merged.pins.first?.place, .pinned)
         XCTAssertTrue(merged.today.isEmpty)
@@ -1450,7 +1475,19 @@ final class SyncBridgeTests: XCTestCase {
         let none = { (id: String) in Tab(id: id, title: id, site: id, icon: "globe", url: nil) }
         let start = Space(id: "local", name: "Personal", emoji: "🏠", tint: RGB(1, 2, 3), pins: [none("start.none"), real])
         let first = Space(id: "first", name: "Personal", emoji: "🏠", tint: RGB(1, 2, 3), pins: [none("first.none")])
-        XCTAssertEqual(SyncBridge.merged(start, into: first).pins.map(\.id), ["first.none", "real"])
+        XCTAssertEqual(SyncBridge.merged(start, into: first, home: \.url).pins.map(\.id), ["first.none", "real"])
+    }
+
+    /// A pin is the same pin by the address it was saved at: two saved at
+    /// different pages and both on a sign-in page now are two, and one saved
+    /// at the same page as the first space's goes, wherever it is now.
+    func testPinsAreTheSameByWhereTheyWereSaved() {
+        let pin = { (id: String) in Tab(id: id, title: id, site: id, icon: "globe", url: "https://example.com/sign-in") }
+        let saved = ["first.mail": "https://example.com/mail", "start.docs": "https://example.com/docs", "start.mail": "https://example.com/mail/"]
+        let start = Space(id: "local", name: "Personal", emoji: "🏠", tint: RGB(1, 2, 3), pins: [pin("start.docs"), pin("start.mail")])
+        let first = Space(id: "first", name: "Personal", emoji: "🏠", tint: RGB(1, 2, 3), pins: [pin("first.mail")])
+        let merged = SyncBridge.merged(start, into: first) { saved[$0.id] ?? $0.url }
+        XCTAssertEqual(merged.pins.map(\.id), ["first.mail", "start.docs"])
     }
 
     /// The starting Personal is Yab's only while named Personal with the

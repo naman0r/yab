@@ -696,14 +696,28 @@ enum Calc {
             guard let found = regex.firstMatch(in: lower, range: NSRange(lower.startIndex..., in: lower)),
                   let countRange = Range(found.range(at: 1), in: lower), let count = Int(lower[countRange]),
                   let unitRange = Range(found.range(at: 2), in: lower),
-                  let span = spans.first(where: { lower[unitRange].hasPrefix($0.0) }),
-                  let target = calendar.date(byAdding: span.1, value: sign * count * span.2, to: today) else { continue }
+                  let span = spans.first(where: { lower[unitRange].hasPrefix($0.0) }) else { continue }
+            // A count of weeks past Int.max / 7 overflowed (a crash), and one
+            // that came to Int.max exactly is NSDateComponentUndefined to
+            // Calendar, which added nothing: the answer was today.
+            let (units, overflow) = count.multipliedReportingOverflow(by: span.2)
+            guard !overflow, units != NSDateComponentUndefined,
+                  let target = calendar.date(byAdding: span.1, value: sign * units, to: today),
+                  writable(target, in: calendar) else { continue }
             let format = datedWeekday
             let label = "\(count) " + (count == 1 ? String(span.3.dropLast()).lowercased() : span.3.lowercased())
             return Answer(question: sign > 0 ? "Today + " + label : "Today − " + label, questionNote: dated(today),
                           result: dated(target, year: true), resultNote: format.string(from: target), copy: dated(target, year: true), kind: .date)
         }
         return nil
+    }
+
+    /// Whether a day some way off can be the answer: one "MMM d, yyyy"
+    /// writes right. It writes no era, so before year 1 the year was wrong
+    /// (975 BC came out as 0975, and 1 BC as 0001, the same as AD 1), and
+    /// from about ten million years on it wrote nothing at all.
+    static func writable(_ day: Date, in calendar: Calendar) -> Bool {
+        calendar.component(.era, from: day) == 1 && !dated(day, year: true).isEmpty
     }
 
     /// The ways a day some way off is said, and which way from today.
@@ -879,6 +893,10 @@ enum Sum {
                 || words.range(of: #"^√\s*[(0-9π]"#, options: .regularExpression) != nil
                 || words.range(of: #"^[0-9.]+\s*π$"#, options: .regularExpression) != nil
         else { return nil }
+        // "0x10" is sixteen in hex (Calc.base reads it), not nought times
+        // ten: an x right after a 0 that starts a number begins a hex
+        // number. Spaced, "0 x 10" stays a sum.
+        guard words.range(of: #"(^|[^0-9.,])0x[0-9]"#, options: .regularExpression) == nil else { return nil }
         var parser = Parser(Array(words.replacingOccurrences(of: " ", with: "")))
         guard let value = parser.expression(), parser.done, value.isFinite else { return nil }
         return (value, shown(value))

@@ -30,7 +30,7 @@ final class Bench {
     static let shared = Bench()
     private var awake: NSObjectProtocol?
 
-    private weak var browser: Browser?
+    weak var browser: Browser?
     /// Tasks from the iPhone: their calls go to it and nowhere else (SyncCenter installs it).
     weak var remoteTaskReader: SyncTaskRead?
     /// The sync verb's Add a Device code (`invite`, `letin`).
@@ -456,7 +456,7 @@ final class Bench {
 
     // MARK: - the commands
 
-    private func handle(_ request: [String: Any], yab: Bool, _ given: @escaping ([String: Any]) -> Void) {
+    func handle(_ request: [String: Any], yab: Bool, _ given: @escaping ([String: Any]) -> Void) {
         if controlOnly { handleControl(request, given); return }
         // Before anything reads the request: a program that isn't Yab's own
         // learns only whether Yab is running.
@@ -464,11 +464,12 @@ final class Bench {
             given(["error": BenchCaller.refusal])
             return
         }
-        // An assistant in the cloud's call, narrowed first (AssistantBoundary).
-        if let browser, AssistantBoundary.caller(request) != nil {
+        // An assistant in the cloud's call, narrowed first (AssistantBoundary),
+        // in the very window it then runs in: a tab of another is checked there.
+        if let browser = target(request), AssistantBoundary.caller(request) != nil {
             switch AssistantBoundary.check(request, bench: self, browser: browser) {
             case .refuse(let why): given(["error": why])
-            case .pass(let bound): handleBound(bound, given)
+            case .pass(let bound): handleBound(bound, given, in: browser)
             }
             return
         }
@@ -517,7 +518,7 @@ final class Bench {
         }
     }
 
-    private func handleBound(_ request: [String: Any], _ given: @escaping ([String: Any]) -> Void) {
+    private func handleBound(_ request: [String: Any], _ given: @escaping ([String: Any]) -> Void, in checked: Browser? = nil) {
         // What agents asked of Yab, for Yab Wrapped; not the probes of a
         // development build.
         if !Store.development, request["woken"] == nil, let verb = request["do"] as? String {
@@ -562,7 +563,7 @@ final class Bench {
                 return windows.indices.contains(number - 1) ? windows[number - 1].browser : nil
             } : nil
         }
-        guard let browser = windowBrowser ?? browser else {
+        guard let browser = checked ?? windowBrowser ?? target(request) else {
             answer(["error": "no browser"])
             return
         }
@@ -3841,7 +3842,7 @@ final class Bench {
                 if tab.hollow { tab.reload() }
                 let limit = Date().addingTimeInterval(12)
                 func ready() {
-                    if (!tab.loading && !tab.hollow) || Date() > limit { self.handleBound(request.merging(["woken": true]) { $1 }, answer) }
+                    if (!tab.loading && !tab.hollow) || Date() > limit { self.handleBound(request.merging(["woken": true]) { $1 }, answer, in: browser) }
                     else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { ready() } }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { ready() }
@@ -9713,6 +9714,20 @@ final class Bench {
         return browser.tabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
             ?? browser.parkedTabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
             ?? browser.outside.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
+    }
+
+    /// The window a call works in: `browser`, or the one holding the tab it
+    /// names when that is another. A task's own tabs stay in the first
+    /// window when it closes, while its calls go to the one in front (#819),
+    /// and what a verb does to a tab's window must be done to its own.
+    func holder(of request: [String: Any], in browser: Browser) -> Browser {
+        guard find(request, in: browser) == nil else { return browser }
+        return BrowserWindows.shared.browsers.first { find(request, in: $0) != nil } ?? browser
+    }
+
+    /// The window a call runs in when the call doesn't pick one.
+    private func target(_ request: [String: Any]) -> Browser? {
+        browser.map { holder(of: request, in: BrowserWindows.shared.live($0)) }
     }
 
     @available(macOS 15.4, *)

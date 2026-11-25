@@ -1488,7 +1488,7 @@ final class SyncBridge {
                 // go into the first space, which every device shares, and
                 // nothing makes a second Personal.
                 if let firstAt, ids.known(space.id) == nil, Self.mergesIntoFirst(space) {
-                    out[firstAt] = Self.merged(space, into: out[firstAt])
+                    out[firstAt] = Self.merged(space, into: out[firstAt], home: pinHome)
                     if app.browser.spaceID == space.id { follow = out[firstAt].id }
                     return false
                 }
@@ -1592,20 +1592,29 @@ final class SyncBridge {
 
     /// `first` with the starting space's tabs at the end of their lists:
     /// preserving pins and kept tabs. Blank new tabs and a pin `first`
-    /// already has at that address stay behind; the one in front stays in front.
-    static func merged(_ start: Space, into first: Space) -> Space {
+    /// already has stay behind; the one in front stays in front. A pin is
+    /// the same pin by `home`, the address it was saved at (pinHome): two
+    /// pins saved at different pages can be on the same page now, a
+    /// sign-in page, and are still two.
+    static func merged(_ start: Space, into first: Space, home: (Tab) -> String?) -> Space {
         var out = first
         let have = Set(first.allTabs.map(\.id))
         // Only real addresses: two blank pins are not the same page.
-        let pinned = Set(first.pins.filter { !isBlank($0) }.compactMap { $0.url.map(address) })
+        let pinned = Set(first.pins.filter { !isBlank($0) }.compactMap { home($0).map(address) })
         for tab in start.keptTabs where !isBlank(tab) && !have.contains(tab.id) { out.kept.append(.tab(tab)) }
-        for tab in start.pins where !tab.isPrivate && !isBlank(tab) && !have.contains(tab.id) && !pinned.contains(tab.url.map(address) ?? "") {
+        for tab in start.pins where !tab.isPrivate && !isBlank(tab) && !have.contains(tab.id) && !pinned.contains(home(tab).map(address) ?? "") {
             out.pins.append(tab)
         }
         for tab in start.today where !isBlank(tab) && !have.contains(tab.id) { out.today.append(tab) }
         out.placeTabs()
         if let current = start.current, out.tab(current) != nil { out.current = current }
         return out
+    }
+
+    /// The address a pin was saved at: its record's home, which the Mac
+    /// writes and the iPhone only carries, else the page it is on.
+    func pinHome(_ tab: Tab) -> String? {
+        ids.known(tab.id).flatMap { mirror.tabs[$0]?.home } ?? tab.url
     }
 
     /// Joining an account again (row 385): `rebuilt`, the space as the

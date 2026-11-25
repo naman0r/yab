@@ -102,6 +102,17 @@ struct JSONViewTests {
         #expect(call(c, "jq", [[]]).toString() == ".")
     }
 
+    @Test func jqQuotesAKeyWithADollarSign() throws {
+        let c = try core()
+        // jq reads `.$schema` as a variable and won't run it.
+        #expect(call(c, "jq", [["$schema"]]).toString() == ".[\"$schema\"]")
+        #expect(call(c, "jq", [["definitions", "user", "$ref"]]).toString() == ".definitions.user[\"$ref\"]")
+        #expect(call(c, "jq", [["$"]]).toString() == ".[\"$\"]")
+        #expect(call(c, "jq", [["items", 0, "id"]]).toString() == ".items[0].id")
+        // Copy Path keeps its own way: `$` is fine in a script's path.
+        #expect(call(c, "pathText", [["definitions", "$ref"]]).toString() == "definitions.$ref")
+    }
+
     @Test func quietHintsBesideValues() throws {
         let c = try core()
         let now = 1_791_835_200_000.0 // 2026-10-12T20:00:00Z

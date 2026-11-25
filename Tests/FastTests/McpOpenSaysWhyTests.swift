@@ -17,6 +17,7 @@ struct McpOpenSaysWhyTests {
 
     @Test func onlyAnOpenThatReachedYabIsTriedAgain() {
         for unreached in [BenchCaller.refusal, "Yab isn't running.", "This task's permission expired.",
+                          "This task's permission expired. Start a new task.", ContextConsent.unavailable,
                           "Yab is open, but agents are off: turn on Yab › Settings › Developers › “Let agents use Yab”.",
                           "Agents are off in Yab: run `yab setup command`, or turn on Yab › Settings › Developers › “Let agents use Yab”."] {
             #expect(Mcp.unreached(unreached), "\(unreached)")

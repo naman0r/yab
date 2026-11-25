@@ -2951,9 +2951,13 @@ extension Agents {
             session(root(of: id))?.nativeOriginTab = first.id
         }
         if let session = session(id), session.state.live {
-            session.saying.append(words)
-            session.carrying.append(carried)
-            session.attaching.append(sent)
+            // The queue's words are the last of `saying`: a message sent now
+            // is heard back before them, so it goes ahead of them. Cursor
+            // queues a steer too, after the rest.
+            let waiting = later || session.cursor != nil ? 0 : session.queue.count
+            session.saying.insert(words, at: max(0, session.saying.count - waiting))
+            session.carrying.insert(carried, at: max(0, session.carrying.count - waiting))
+            session.attaching.insert(sent, at: max(0, session.attaching.count - waiting))
             if later { queue(id, message) } else { _ = steer(id, message) }
             return
         }

@@ -787,7 +787,7 @@ extension Bench {
             }
         case "pdf" where tabs.count > 1 || reader:
             PageSave.book(tabs, reader: reader, title: request["title"] as? String, in: folder, done: saved)
-        case "md", "txt" where tabs.count > 1:
+        case _ where PageSave.joinsTabs(format: format, count: tabs.count):
             PageSave.joined(tabs, as: format, title: request["title"] as? String, in: folder, done: saved)
         default:
             PageSave.save(tab, as: format, in: folder, done: saved)
