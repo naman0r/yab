@@ -364,7 +364,10 @@ final class BrowserWindows: ObservableObject {
     /// window those are stale copies of the ones on screen (#819).
     func live(_ kept: Browser) -> Browser {
         guard closedAt[kept.windowID ?? Self.primaryID] != nil else { return kept }
-        return activeBrowser ?? kept
+        // Never a private window: a tab an agent opens there is shy, and no
+        // session may use it.
+        if let front = activeBrowser, front.windowPurpose == .normal { return front }
+        return normalBrowsers.last { window(for: $0)?.isVisible == true } ?? kept
     }
 
     /// `near`: the window it was asked from, the one in front if none.

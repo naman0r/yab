@@ -8,8 +8,9 @@ import Testing
 @MainActor @Suite(.serialized)
 struct AgentLiveWindowTests {
     /// A first window with a tab on a.example, a second in front on
-    /// b.example, and the first closed.
-    private func closingTheFirst(_ body: (_ first: Browser, _ second: Browser, _ stale: Tab) throws -> Void) throws {
+    /// b.example (`privately`: a private window in front of that), and the
+    /// first closed.
+    private func closingTheFirst(privately: Bool = false, _ body: (_ first: Browser, _ second: Browser, _ stale: Tab) throws -> Void) throws {
         try #require(Store.testing && Store.unitTests && Store.settings !== UserDefaults.standard)
         func window() -> NSWindow {
             let made = NSWindow(contentRect: NSRect(x: -30_000, y: -30_000, width: 800, height: 600),
@@ -35,8 +36,16 @@ struct AgentLiveWindowTests {
         BrowserWindows.shared.register(secondWindow, for: second)
         secondWindow.orderFront(nil)
         _ = tab("https://b.example.test/download", in: second)
+        var made = [(first, firstWindow), (second, secondWindow)]
+        if privately {
+            let shy = Browser(windowID: UUID(), purpose: .privateOnly)
+            let shyWindow = window()
+            BrowserWindows.shared.register(shyWindow, for: shy)
+            shyWindow.orderFront(nil)
+            made.append((shy, shyWindow))
+        }
         defer {
-            for (browser, window) in [(first, firstWindow), (second, secondWindow)] {
+            for (browser, window) in made {
                 browser.tabs.forEach { $0.close() }
                 window.close()
                 BrowserWindows.shared.forgetForTests(browser)
@@ -64,6 +73,14 @@ struct AgentLiveWindowTests {
             let front = rows.filter { $0["active"] as? Bool == true }.compactMap { $0["url"] as? String }
             #expect(front == ["https://b.example.test/download"])
             #expect(!rows.contains { $0["url"] as? String == "https://a.example.test/" })
+        }
+    }
+
+    /// Not a private window in front: the tabs an agent opened there would
+    /// be shy, and refused to its next call.
+    @Test func aPrivateWindowInFrontLeavesTheToolsInANormalOne() throws {
+        try closingTheFirst(privately: true) { first, second, _ in
+            #expect(BrowserWindows.shared.live(first) === second)
         }
     }
 
