@@ -240,6 +240,9 @@ final class ColumnHand: NSObject {
     /// Where the press began and where the hand is, in the column's space
     /// (SideBar's "column": in from the margin, down from the top).
     private var startAt: CGPoint = .zero
+    /// Where the press fell in its row, from the row's top left, for the
+    /// chip of a split's row it took (`decking`).
+    private(set) var pressInRow: CGPoint = .zero
     private var at: CGPoint = .zero
     private var scrollAtStart: CGFloat = 0
     private var scrollTimer: Timer?
@@ -571,6 +574,7 @@ final class ColumnHand: NSObject {
             scrollAtStart = page.offset
             at = point
             guard let item = page.item(at: grip.start) else { return grip.state = .cancelled }
+            if let middle = page.rowMiddle(item.id) { pressInRow = CGPoint(x: startAt.x, y: grip.start.y - (middle - item.height / 2)) }
             spaceCarry = ColumnSpaceCarry(browser: browser, page: page, hand: self, item: item, start: grip.start)
             // The stationary pager's points only when the page sits in one;
             // a page hosted alone keeps its own (flipped) coordinates.
@@ -979,7 +983,7 @@ final class ColumnHand: NSObject {
         let out = browser.flank == .left ? point.x > width - SideBar.margin + 8 : point.x < -SideBar.margin - 8
         if out { unfold() }
         if out, decked == nil, carry == nil, let herd, herd.ids.count == 1, !herd.landed,
-           let deck = decking(tab, at: startAt.x), SplitDeck.shared.begin(deck, in: browser) {
+           let deck = decking(tab), SplitDeck.shared.begin(deck, in: browser) {
             unfold()
             decked = deck.id
             self.herd = nil
@@ -998,7 +1002,7 @@ final class ColumnHand: NSObject {
             if out { SplitDeck.shared.move(); return }
             SplitDeck.shared.leave()
             decked = nil
-        } else if out, carry == nil, let deck = decking(tab, at: startAt.x), SplitDeck.shared.begin(deck, in: browser) {
+        } else if out, carry == nil, let deck = decking(tab), SplitDeck.shared.begin(deck, in: browser) {
             unfold()
             decked = deck.id
             target = from
@@ -1552,11 +1556,10 @@ final class ColumnHand: NSObject {
         spaceCarry?.refreshHand()
     }
 
-    private func decking(_ tab: Tab, at x: CGFloat) -> Tab? {
+    /// The chip under the press, of a split's row: as PairRow lays them.
+    func decking(_ tab: Tab) -> Tab? {
         guard let browser, let pair = browser.pair(of: tab.id), pair.first == tab.id else { return tab }
-        // The chip under the hand, of the row's two, three or four.
-        let at = min(pair.count - 1, max(0, Int(x / max(1, columnWidth / CGFloat(pair.count)))))
-        return browser.tab(id: pair.ids[at]) ?? tab
+        return PairRow.chip(pair.ids.compactMap(browser.tab(id:)), at: pressInRow, width: columnWidth) ?? tab
     }
 
     // MARK: - a folder of yours in the hand (SideBar.nestReorder)

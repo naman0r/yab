@@ -1214,8 +1214,7 @@ struct SideBar: View {
         if cell.nest != nil { return 1 }
         if cell.index == Slot.line { return folders.lined ? Folders.lineRows : 1 }
         guard let tab = cell.tab else { return 1 }
-        let place = folders.place(of: tab)
-        return (place?.heads.count ?? 0) + (place?.shown == false ? 0 : 1) + ((place?.more ?? 0) > 0 ? 1 : 0)
+        return ColumnLayout.rows(.tab(tab), folders: folders)
     }
 
     private func drawnRows(_ cells: [Slot]) -> Int { cells.reduce(0) { $0 + drawnRows($1) } }
@@ -1354,7 +1353,7 @@ struct SideBar: View {
                 // One row taken down past the list, and on out over the
                 // pages: it goes back to its gap, and the deck has it.
                 if out, decked == nil, carry == nil, let herd, herd.ids.count == 1, !herd.landed,
-                   let held = decking(tab, at: value.startLocation.x), SplitDeck.shared.begin(held, in: browser) {
+                   let held = decking(tab, at: value.startLocation, index: index), SplitDeck.shared.begin(held, in: browser) {
                     decked = held.id
                     withAnimation(Motion.settle) {
                         self.herd = nil
@@ -1373,7 +1372,7 @@ struct SideBar: View {
                     if out { SplitDeck.shared.move(); return }
                     SplitDeck.shared.leave()
                     decked = nil
-                } else if out, carry == nil, let held = decking(tab, at: value.startLocation.x),
+                } else if out, carry == nil, let held = decking(tab, at: value.startLocation, index: index),
                           SplitDeck.shared.begin(held, in: browser) {
                     decked = held.id
                     withAnimation(Motion.settle) {
@@ -1987,10 +1986,10 @@ struct SideBar: View {
 
     /// Which tab of a row goes out over the pages: the row's own, or, from
     /// a pair's row, the chip the hand took it by.
-    private func decking(_ tab: Tab, at x: CGFloat) -> Tab? {
+    private func decking(_ tab: Tab, at point: CGPoint, index: Int) -> Tab? {
         guard let pair = browser.pair(of: tab.id), pair.first == tab.id else { return tab }
-        let at = min(pair.count - 1, max(0, Int(x / max(1, columnWidth / CGFloat(pair.count)))))
-        return browser.tab(id: pair.ids[at]) ?? tab
+        let top = rowsTop + CGFloat(drawnRow(tab, index: index)) * (SideBar.row + SideBar.gap)
+        return PairRow.chip(pair.ids.compactMap(browser.tab(id:)), at: CGPoint(x: point.x, y: point.y - top), width: columnWidth) ?? tab
     }
 
     // MARK: - carrying several
@@ -3477,6 +3476,17 @@ struct PairRow: View {
     static var chipHeight: CGFloat { SideBar.row - 2 * inset }
     /// The narrowest chip with room for a mark and a few letters of title.
     static let titled: CGFloat = 72
+
+    /// The chip a press lands on, `point` from the row's top left in a row
+    /// `width` wide, as `chipRows` lays them: the press's row of chips by
+    /// its height, then the chip by its width.
+    static func chip(_ all: [Tab], at point: CGPoint, width: CGFloat) -> Tab? {
+        let rows = chipRows(all)
+        guard !all.isEmpty else { return nil }
+        let line = rows.count > 1 && point.y >= height(rows: rows.count) / 2 ? 1 : 0
+        let columns = rows[line].count
+        return rows[line][min(columns - 1, max(0, Int(point.x / max(1, width / CGFloat(columns)))))]
+    }
 
     /// The chips as the panes stand: four in two rows of two, the fourth
     /// below the first and the third below the second; fewer in one row.

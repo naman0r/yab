@@ -1073,7 +1073,7 @@ final class Folders: ObservableObject {
 
     /// The slots a tab's own row takes: one, or two for the first of a
     /// split of four, whose chips stand in two rows (PairRow).
-    private func rows(_ tab: Tab) -> Int { max(1, browser?.rowsTaken(by: tab.id) ?? 1) }
+    func rows(_ tab: Tab) -> Int { max(1, browser?.rowsTaken(by: tab.id) ?? 1) }
 
     /// The kept tabs in folders of yours that are open, as Arc's pinned
     /// tab is from its first click until its minus or ⌘W: opened since the

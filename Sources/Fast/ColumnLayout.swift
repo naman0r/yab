@@ -227,8 +227,9 @@ enum ColumnLayout {
         case .line: return folders.lined ? Folders.lineRows : 1
         case .gap: return 1
         case .tab(let tab):
+            // A split of four's own row is two rows (Folders.rows).
             let place = folders.place(of: tab)
-            return (place?.heads.count ?? 0) + (place?.shown == false ? 0 : 1) + ((place?.more ?? 0) > 0 ? 1 : 0)
+            return (place?.heads.count ?? 0) + (place?.shown == false ? 0 : folders.rows(tab)) + ((place?.more ?? 0) > 0 ? 1 : 0)
         }
     }
 
