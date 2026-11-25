@@ -1130,7 +1130,7 @@ struct ContentView: View {
                                 // its margins, so they are added back. The
                                 // top rim is each one's own, so the notice
                                 // can be tucked away above it.
-                                .padding(.top, margins.top + barHeight)
+                                .padding(.top, margins.top + barHeight + max(0, browser.frontPaneInset()?.top ?? 0))
                                 .padding(.trailing, margins.trailing + Metrics.rim + devTrail + frontTrail(in: room.size.width - margins.leading - margins.trailing - devTrail))
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                                 }
@@ -1141,7 +1141,7 @@ struct ContentView: View {
                                 // its buttons in the corner (AskStand).
                                 GeometryReader { room in
                                     AskStandView(browser: browser)
-                                        .padding(.bottom, margins.bottom + Metrics.rim)
+                                        .padding(.bottom, margins.bottom + Metrics.rim + max(0, browser.frontPaneInset()?.bottom ?? 0))
                                         .padding(.trailing, margins.trailing + Metrics.rim + devTrail + frontTrail(in: room.size.width - margins.leading - margins.trailing - devTrail))
                                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                                 }
@@ -1452,9 +1452,7 @@ struct ContentView: View {
     /// takes: the find bar and the notices are about the page in front, and
     /// stand in its corner, not the window's.
     private func frontTrail(in room: CGFloat) -> CGFloat {
-        if browser.splitShown, browser.stagePair?.halves == false, room > 0, let id = browser.activeID, let frame = browser.paneFrames()[id] {
-            return max(0, browser.splitBook.place.maxX - frame.maxX)
-        }
+        if room > 0, let inset = browser.frontPaneInset() { return max(0, inset.trailing) }
         guard browser.splitShown, let pair = browser.stagePair, browser.activeID == pair.first, room > 0 else { return 0 }
         // As SplitLayout places the halves.
         let left = ((room - Pair.gap) * pair.share).rounded()

@@ -3476,9 +3476,7 @@ struct PairRow: View {
     static let titled: CGFloat = 72
 
     /// The panes past the second, of a split of three or four.
-    private var more: [Tab] {
-        (browser.pair(of: first.id)?.more ?? []).compactMap { id in browser.tabs.first { $0.id == id } }
-    }
+    private var more: [Tab] { browser.morePanes(of: first.id) }
 
     var body: some View {
         let on = shown ?? (browser.stagePair?.contains(first.id) == true)

@@ -342,6 +342,18 @@ extension Browser {
         return tabs.first { $0.id == other }
     }
 
+    /// The panes past the second of the split `first` heads, on screen or
+    /// in a space's parked row, for its row in the column: a space sliding
+    /// in (PagedSpace) draws its rows from its parked one.
+    func morePanes(of first: Tab.ID) -> [Tab] {
+        if let pair = pair(of: first) { return pair.more.compactMap { id in tabs.first { $0.id == id } } }
+        for row in parked.values {
+            guard let pair = row.pairs.first(where: { $0.first == first }) else { continue }
+            return pair.more.compactMap { id in row.tabs.first { $0.id == id } }
+        }
+        return []
+    }
+
     /// The other tabs of the split `id` is in, in the row's order.
     func mates(of id: Tab.ID) -> [Tab.ID] {
         pair(of: id)?.ids.filter { $0 != id } ?? []
@@ -626,6 +638,15 @@ extension Browser {
         guard let pair = stagePair, wide != id else { return .whole }
         guard pair.halves else { return .pane(pair.ids.firstIndex(of: id) ?? 0) }
         return pair.first == id ? .left : .right
+    }
+
+    /// How far the pane in front stands in from the room's edges, for what
+    /// floats over the page in front: the find bar, the notices, an agent's
+    /// question. Nil for one page or two halves.
+    func frontPaneInset() -> (top: CGFloat, bottom: CGFloat, trailing: CGFloat)? {
+        guard stagePair?.halves == false, let id = activeID, let frame = paneFrames()[id] else { return nil }
+        let room = splitBook.place
+        return (frame.minY - room.minY, room.maxY - frame.maxY, room.maxX - frame.maxX)
     }
 
     /// Where each pane of the split on screen is in the window, from its top
@@ -1403,7 +1424,12 @@ extension Browser {
     /// SplitRule's layers, which know two halves.
     func dragCuts(to cuts: [CGFloat]) {
         guard let pair = stagePair else { return }
-        let cuts = SplitLayout.held(cuts, pair.count, pair.arrangement, in: splitBook.place.size)
+        // The divider in the hand is the one moved from where they were
+        // taken: it pushes those before it back as it pushes those after on.
+        let grabbed = splitDrag.grabbedCuts ?? pair.allCuts
+        let moving = zip(grabbed, cuts).enumerated().first { abs($0.element.0 - $0.element.1) > 0.0001 }?.offset
+        let pushed = moving.map { SplitLayout.pushed(cuts, back: $0, pair.count, pair.arrangement, in: splitBook.place.size) } ?? cuts
+        let cuts = SplitLayout.held(pushed, pair.count, pair.arrangement, in: splitBook.place.size)
         if splitDrag.armed {
             if splitDrag.cuts != cuts { splitDrag.cuts = cuts }
         } else {
@@ -1515,7 +1541,7 @@ extension Browser {
         let room = splitBook.place.width
         if stagePair != nil, room > 0, let window = BrowserWindows.shared.window(for: self) ?? Links.window {
             let width = window.contentRect(forFrameRect: window.frame).width
-            floor = max(floor, min(width, width - room + Pair.room))
+            floor = max(floor, min(width, width - room + splitWidth))
         }
         if windowFloor != floor { windowFloor = floor }
         applyWindowFloorSoon()
@@ -1561,7 +1587,13 @@ extension Browser {
     /// and leave both halves their least: without a pair, any width.
     var columnMost: CGFloat {
         guard stagePair != nil, splitBook.place.width > 0 else { return .infinity }
-        return splitBook.place.width + sideShown - Pair.room
+        return splitBook.place.width + sideShown - splitWidth
+    }
+
+    /// The page the split on screen needs: two halves, or every pane as it
+    /// is laid.
+    var splitWidth: CGFloat {
+        stagePair.map { Pair.room($0.count, $0.arrangement) } ?? Pair.room
     }
 
     /// The window's own least width, without a pair (see YabApp).
@@ -1711,6 +1743,22 @@ struct SplitLayout: Layout {
             start = end
         }
         return (spans, gaps)
+    }
+
+    /// The dividers before `back` moved back far enough to leave each pane
+    /// its least, as `line` moves those after it on. A grid's two never
+    /// meet.
+    static func pushed(_ cuts: [CGFloat], back: Int, _ count: Int, _ arrangement: Pair.Arrangement, in size: CGSize) -> [CGFloat] {
+        guard arrangement != .grid, cuts.indices.contains(back), back > 0 else { return cuts }
+        let length = arrangement == .stacked ? size.height : size.width
+        let gap = min(Pair.gap, max(0, length) / CGFloat(max(1, count)))
+        let room = max(1, length - gap * CGFloat(count - 1))
+        let floor = arrangement == .stacked ? Pair.lowest : Pair.narrowest
+        let least = min(room / CGFloat(count), max(floor, count == 2 ? room * Pair.least : 0)) / room
+        var cuts = cuts
+        cuts[back] = max(cuts[back], CGFloat(back + 1) * least)
+        for at in stride(from: back - 1, through: 0, by: -1) { cuts[at] = min(cuts[at], cuts[at + 1] - least) }
+        return cuts
     }
 
     /// The dividers' places as a room this big shows them, kept to what each
