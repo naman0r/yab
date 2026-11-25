@@ -30,4 +30,18 @@ struct GlassPinsSettingTests {
         #expect(prefs.glassPins && setting.saved == .bool(true))
         #expect(SyncShapes.settingKeys.contains(key))
     }
+
+    /// Turned off on another Mac: sync writes the store, then each window's
+    /// preferences take a fresh read of it, and the pins go flat at once.
+    @Test func glassPinsTurnedOffElsewhereReachTheOpenWindows() {
+        let key = "pins.glass"
+        let previous = Store.settings.object(forKey: key)
+        defer { Store.settings.set(previous, forKey: key) }
+        Store.settings.set(true, forKey: key)
+        let live = Preferences()
+
+        Store.settings.set(false, forKey: key)
+        live.adopt(Preferences())
+        #expect(!live.glassPins)
+    }
 }
