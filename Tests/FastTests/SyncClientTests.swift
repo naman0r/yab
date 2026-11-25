@@ -142,6 +142,32 @@ struct SyncClientTests {
         #expect(await until(b) { b.journal.record(key)?["title"] == "Mac" })
     }
 
+    /// A conflict whose merge didn't happen (a failed write, or the app's
+    /// deliver turning it away) is not sent on the server's version: that
+    /// would replace the fields only the server has.
+    @Test func aConflictLeftUnmergedKeepsTheServersFields() async throws {
+        let server = MemoryServer(), seal = Seal.make()
+        let key = Record.Key(collection: "c.mark", id: "1")
+        let b = try client(server, seal, "b")
+        b.start()
+        #expect(await until(b) { b.state == .live })
+        try b.journal.change(key, ["url": "https://b.test"])
+        b.kick()
+        #expect(await until(b) { b.journal.pending().isEmpty })
+        let a = try client(server, seal, "a")
+        a.deliver = { _ in }
+        try a.journal.change(key, ["title": "Mac"])
+        a.start()
+        #expect(await until(a) {
+            server.lock.lock(); defer { server.lock.unlock() }
+            return a.journal.pending().isEmpty || (server.pushes["a"] ?? 0) >= 3
+        })
+        a.stop()
+        server.lock.lock(); let blob = server.records.values.first?[seal.name(key)]?.blob; server.lock.unlock()
+        let kept = try blob.flatMap { Data(base64Encoded: $0) }.map { try seal.open($0, name: seal.name(key)) }
+        #expect(kept?["url"] == "https://b.test")
+    }
+
     /// A full account once stopped a device's every change for good, the
     /// iPhone's words to the Mac among them: now what fits still goes, and
     /// a removal that frees room lets what was turned away go after it.

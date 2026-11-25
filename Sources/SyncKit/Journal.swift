@@ -843,10 +843,12 @@ public final class Journal: @unchecked Sendable {
     /// A conflict, merged already, goes again on top of the version the
     /// server gave, even one below this device's (a server behind its
     /// journal answers any other base with the same conflict). Dirty stays
-    /// as the merge left it.
-    public func conflicted(_ key: Record.Key, version: Int64) throws {
+    /// as the merge left it. A merge that didn't happen (a failed write, or
+    /// the app turning the record away) keeps the old version, so the next
+    /// push meets the conflict again instead of overwriting the server's.
+    public func conflicted(_ theirs: Record, version: Int64) throws {
         try queue.sync {
-            guard let had = load(key) else { return }
+            guard let had = load(theirs.key), had.record.merged(with: theirs) == had.record else { return }
             try save(had.record, dirty: had.dirty, version: version)
         }
     }
