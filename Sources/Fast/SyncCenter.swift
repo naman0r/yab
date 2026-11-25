@@ -2028,7 +2028,7 @@ extension Browser {
                 }
                 // Read further elsewhere: there when it is next looked at
                 // here. The page on screen stays where you are.
-                let shown = onScreen && (tab.id == active || pair(of: active).map { $0.first == tab.id || $0.second == tab.id } == true)
+                let shown = onScreen && (tab.id == active || pair(of: active).map { $0.contains(tab.id) } == true)
                 if tab.depth != entry.depth, !shown {
                     tab.arrive(at: entry.depth, now: true)
                 }
@@ -2104,6 +2104,14 @@ extension Browser {
             return Pair(first: a, second: b, share: min(Pair.most, max(Pair.least, CGFloat(pair.share))))
         }
         let remaining = Set(row.map(\.id))
+        // Sync carries the first two of a split; the panes past them stay
+        // this Mac's, as long as their tabs do.
+        newPairs = newPairs.map { pair in
+            guard let local = localPairs.first(where: { $0.first == pair.first && $0.second == pair.second }), !local.halves else { return pair }
+            let more = local.more.filter { remaining.contains($0) && !paired.contains($0) }
+            paired.formUnion(more)
+            return more == local.more ? local : local.with(local.ids.filter { !local.more.contains($0) || more.contains($0) }) ?? pair
+        }
         for pair in localPairs {
             guard !syncedIDs.contains(pair.first) || !syncedIDs.contains(pair.second),
                   pair.first != pair.second, remaining.contains(pair.first), remaining.contains(pair.second),

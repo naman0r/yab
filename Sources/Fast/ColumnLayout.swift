@@ -170,7 +170,8 @@ enum ColumnLayout {
         case gap
     }
 
-    /// The rows' cells as SideBar's baseSlots lays them: no pair's second,
+    /// The rows' cells as SideBar's baseSlots lays them: no pane of a split
+    /// but its first,
     /// no tab tucked away (but a folder's first, whose cell its folder's row
     /// is in), empty folders at the end of their folder's run or of the
     /// kept, the line heading today's.
@@ -179,7 +180,7 @@ enum ColumnLayout {
         let loose = browser.tabs.filter { $0.pin == nil }
         let joined = !browser.pairs.isEmpty
         var cells: [Cell] = loose.compactMap { tab in
-            if joined, browser.pair(of: tab.id)?.second == tab.id { return nil }
+            if joined, let pair = browser.pair(of: tab.id), pair.first != tab.id { return nil }
             if let place = folders.place(of: tab), !place.shown, !place.listed, !place.head { return nil }
             return .tab(tab)
         }
@@ -455,7 +456,7 @@ enum ColumnLayout {
             case .tab(let tab, let depth):
                 if let pair = row.pairs.first(where: { $0.first == tab.id }), let other = row.tabs.first(where: { $0.id == pair.second }) {
                     add(tab.id.uuidString, .pair(tab, other), indent: CGFloat(depth) * Folders.indent)
-                } else if !row.pairs.contains(where: { $0.second == tab.id }) {
+                } else if !row.pairs.contains(where: { $0.contains(tab.id) && $0.first != tab.id }) {
                     add(tab.id.uuidString, .tab(tab), indent: CGFloat(depth) * Folders.indent)
                 }
             case .line:

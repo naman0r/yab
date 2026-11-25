@@ -585,11 +585,11 @@ struct SideBar: View {
     /// from what was drawn rather than measured: a measurement would arrive a
     /// frame late, and for one frame the whole column would drag the window.
     private var rowsEnd: CGFloat {
-        var rows = browser.tabs.count - browser.pinnedCount + folders.extra + (carry.map { $0.toPins ? -1 : 1 } ?? 0) - browser.pairs.count
+        var rows = browser.tabs.count - browser.pinnedCount + folders.extra + (carry.map { $0.toPins ? -1 : 1 } ?? 0) - browser.pairs.reduce(0) { $0 + $1.count - 1 }
             + (lineComing == nil ? 0 : 1)
         if let herd, !herd.landed { rows -= herd.ids.count - (herd.index == nil ? 0 : 1) }
-        // A pair's second has no row of its own, as `pairs.count` says.
-        rows -= browser.dustFolded.filter { browser.pair(of: $0)?.second != $0 }.count + browser.dustFoldedRows.count
+        // A split's panes past its first have no row of their own.
+        rows -= browser.dustFolded.filter { id in browser.pair(of: id).map { $0.first == id } ?? true }.count + browser.dustFoldedRows.count
         let loose = CGFloat(max(0, rows)) * (SideBar.row + SideBar.gap)
         // New Tab's row: the line's second, or its own over the rows.
         return top + pinBlock(count: shownPins) + nameBlock + loose + (folders.lined ? 0 : SideBar.row + SideBar.gap) + 8
@@ -883,7 +883,7 @@ struct SideBar: View {
             let lineShown = source.lineShown
             ForEach(source.slots) { cell in
                 let step = SideBar.row + SideBar.gap
-                if let tab = cell.tab, rows != nil, let pair = browser.pair(of: tab.id), pair.second == tab.id {
+                if let tab = cell.tab, rows != nil, let pair = browser.pair(of: tab.id), pair.first != tab.id {
                     // Its first's row holds it, beside it (see PairRow).
                     Color.clear.frame(height: 0)
                 } else if let tab = cell.tab {
@@ -1059,7 +1059,7 @@ struct SideBar: View {
         guard !browser.pairs.isEmpty else { return nil }
         var row = -1
         return looseTabs.map { tab in
-            if browser.pair(of: tab.id)?.second != tab.id { row += 1 }
+            if browser.pair(of: tab.id).map({ $0.first == tab.id }) ?? true { row += 1 }
             return max(0, row)
         }
     }
@@ -1143,7 +1143,7 @@ struct SideBar: View {
     /// placed as the one row it is drawn as.
     private func alone(_ held: Tab) -> [Tab] {
         guard let pair = browser.pair(of: held.id), pair.first == held.id else { return looseTabs }
-        return looseTabs.filter { $0.id != pair.second }
+        return looseTabs.filter { !pair.contains($0.id) || $0.id == held.id }
     }
 
     private func drawnRow(_ tab: Tab, index: Int) -> Int {
@@ -1175,7 +1175,7 @@ struct SideBar: View {
         // for the folder's own row drawn in it.
         let joined = !browser.pairs.isEmpty
         var cells = looseTabs.enumerated().compactMap { index, tab -> Slot? in
-            if joined, browser.pair(of: tab.id)?.second == tab.id { return nil }
+            if joined, let pair = browser.pair(of: tab.id), pair.first != tab.id { return nil }
             if let place = folders.place(of: tab), !place.shown, !place.listed, !place.head { return nil }
             return Slot(tab: tab, index: index)
         }
@@ -1399,7 +1399,7 @@ struct SideBar: View {
                     withAnimation(Motion.settle) { target = from }
                     // A pair row goes as the pair (#259).
                     let pair = browser.pair(of: tab.id).flatMap { $0.first == tab.id && browser.tab(id: $0.second) != nil ? $0 : nil }
-                    gather(pair.map { [$0.first, $0.second] } ?? [tab.id], held: tab, index: index, step: step, at: value)
+                    gather(pair?.ids ?? [tab.id], held: tab, index: index, step: step, at: value)
                     herdMove(to: value.location, step: step)
                     return
                 }
@@ -1597,8 +1597,8 @@ struct SideBar: View {
                     // Among folders a pair's row is placed without its second
                     // (see `alone`); taken down past where it was, the second
                     // it leaves behind is one more before it.
-                    let past = aim != nil && target > from && browser.partner(of: tab) != nil && browser.pair(of: tab.id)?.first == tab.id
-                    if target != from { browser.move(tab, to: target + (past ? 1 : 0) + browser.pinnedCount) }
+                    let past = aim != nil && target > from && browser.pair(of: tab.id)?.first == tab.id ? browser.mates(of: tab.id).count : 0
+                    if target != from { browser.move(tab, to: target + past + browser.pinnedCount) }
                     if changed {
                         folders.refresh()
                         browser.writeSession(now: true)
@@ -1859,9 +1859,9 @@ struct SideBar: View {
     private func neighbor(of held: Tab, want: Double) -> (id: Tab.ID, slot: Int)? {
         guard held.keepable, let gap = aim?.slot else { return nil }
         let up = want < Double(gap)
-        let partner = browser.partner(of: held)?.id
+        let mates = browser.mates(of: held.id)
         let near = up ? gap - 1 : gap + 1
-        for tab in looseTabs where tab.id != held.id && tab.id != partner {
+        for tab in looseTabs where tab.id != held.id && !mates.contains(tab.id) {
             // A tab tucked away in a shut folder shares the slot after it.
             guard shifts.drawn[tab.id] == near, folders.place(of: tab)?.shown ?? true else { continue }
             // In a folder of yours too: the two make a folder in it.
@@ -1986,8 +1986,9 @@ struct SideBar: View {
     /// Which tab of a row goes out over the pages: the row's own, or, from
     /// a pair's row, the chip the hand took it by.
     private func decking(_ tab: Tab, at x: CGFloat) -> Tab? {
-        guard let other = browser.partner(of: tab), browser.pair(of: tab.id)?.first == tab.id else { return tab }
-        return x > columnWidth / 2 ? other : tab
+        guard let pair = browser.pair(of: tab.id), pair.first == tab.id else { return tab }
+        let at = min(pair.count - 1, max(0, Int(x / max(1, columnWidth / CGFloat(pair.count)))))
+        return browser.tab(id: pair.ids[at]) ?? tab
     }
 
     // MARK: - carrying several
@@ -2275,7 +2276,7 @@ struct SideBar: View {
     /// Below the last row, or, with the column full of them, near its foot,
     /// where the space's capsule is.
     private func belowRows(_ y: CGFloat) -> Bool {
-        let rowsEnd = rowsTop + CGFloat(looseTabs.count + folders.extra - browser.pairs.count
+        let rowsEnd = rowsTop + CGFloat(looseTabs.count + folders.extra - browser.pairs.reduce(0) { $0 + $1.count - 1 }
             + (folders.lined ? 0 : 1)) * (SideBar.row + SideBar.gap) + 8
         return y > min(rowsEnd, columnHeight - SideBar.footHeight - 24)
     }
@@ -2924,7 +2925,7 @@ struct PagedSpace: View, Equatable {
                                    let other = row.tabs.first(where: { $0.id == pair.second }) {
                                     PairRow(browser: browser, prefs: prefs, first: tab, second: other,
                                             shown: row.active == tab.id || row.active == other.id)
-                                } else if !row.pairs.contains(where: { $0.second == tab.id }) {
+                                } else if !row.pairs.contains(where: { $0.contains(tab.id) && $0.first != tab.id }) {
                                     SideRow(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active, closes: false)
                                 }
                             }
@@ -3443,8 +3444,8 @@ struct PinPairMarks: View {
     }
 }
 
-/// Two tabs side by side down the column: one row, each tab a chip in it,
-/// its mark and as much of its title as fits. On screen, the row wears the
+/// Two tabs side by side down the column, or three or four: one row, each
+/// tab a chip in it, its mark and as much of its title as fits. On screen, the row wears the
 /// live tab's gray, and both halves are chips lifted off it; at rest,
 /// only the hairline between the halves remains. A click on a chip is a
 /// click on that tab: the pair comes up with that half in front, or, the
@@ -3471,24 +3472,41 @@ struct PairRow: View {
     /// proportion. Shared with the AppKit column's reported chip frames.
     static var inset: CGFloat { Density.current == .compact ? 3 : 4 }
     static var chipHeight: CGFloat { SideBar.row - 2 * inset }
+    /// The narrowest chip with room for a mark and a few letters of title.
+    static let titled: CGFloat = 72
+
+    /// The panes past the second, of a split of three or four.
+    private var more: [Tab] {
+        (browser.pair(of: first.id)?.more ?? []).compactMap { id in browser.tabs.first { $0.id == id } }
+    }
 
     var body: some View {
         let on = shown ?? (browser.stagePair?.contains(first.id) == true)
         let pointed = hovering && !lifted
+        let more = more
+        let all = [first, second] + more
         GeometryReader { geo in
-            let half = max(0, (geo.size.width - 2 * Self.inset - SideBar.gap) / 2)
+            let count = CGFloat(all.count)
+            let half = max(0, (geo.size.width - 2 * Self.inset - (count - 1) * SideBar.gap) / count)
             let end = pointed ? RowPlate.column.side + SideBar.gap : 0
             HStack(spacing: SideBar.gap) {
                 // The first half stays put when the group button comes in;
-                // only the second gives it room, as in the Arc reference.
-                PairChip(browser: browser, prefs: prefs, tab: first, on: on)
+                // only the last gives it room, as in the Arc reference.
+                // Three or four in a narrow column: each its mark alone, as
+                // a title cut to its first letters reads as nothing.
+                let titled = half >= Self.titled
+                PairChip(browser: browser, prefs: prefs, tab: first, on: on, titled: titled)
                     .frame(width: half)
-                PairChip(browser: browser, prefs: prefs, tab: second, on: on)
-                    .frame(width: max(0, half - end))
+                PairChip(browser: browser, prefs: prefs, tab: second, on: on, titled: titled)
+                    .frame(width: max(0, half - (more.isEmpty ? end : 0)))
+                ForEach(more, id: \.id) { tab in
+                    PairChip(browser: browser, prefs: prefs, tab: tab, on: on, titled: titled)
+                        .frame(width: max(0, half - (tab === more.last ? end : 0)))
+                }
                 if pointed {
                     TabEnd(browser: browser, tab: first, live: on, hovering: true, editing: false,
-                           tint: Palette.ink, speaker: false, close: { browser.shut([first, second]) },
-                           unkeep: first.kept && second.kept ? { browser.discard([first, second], rekept: true) } : nil,
+                           tint: Palette.ink, speaker: false, close: { browser.shut(all) },
+                           unkeep: all.allSatisfy(\.kept) ? { browser.discard(all, rekept: true) } : nil,
                            reach: SideBar.row, plate: .column, slotSide: 15)
                         .frame(width: RowPlate.column.side, height: Self.chipHeight)
                         .accessibilityElement(children: .ignore)
@@ -3496,10 +3514,10 @@ struct PairRow: View {
                         .accessibilityAddTraits(.isButton)
                         .accessibilityAction {
                             browser.glance.drop()
-                            if first.kept && second.kept && first.putDown && second.putDown {
-                                browser.discard([first, second], rekept: true)
+                            if all.allSatisfy({ $0.kept && $0.putDown }) {
+                                browser.discard(all, rekept: true)
                             } else {
-                                browser.shut([first, second])
+                                browser.shut(all)
                             }
                         }
                 }
@@ -3507,10 +3525,12 @@ struct PairRow: View {
             .padding(Self.inset)
             .overlay {
                 if !on {
-                    Rectangle().fill(Palette.ink.opacity(0.18))
-                        .frame(width: 1, height: 16)
-                        .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                        .allowsHitTesting(false)
+                    ForEach(1..<all.count, id: \.self) { at in
+                        Rectangle().fill(Palette.ink.opacity(0.18))
+                            .frame(width: 1, height: 16)
+                            .position(x: Self.inset + CGFloat(at) * (half + SideBar.gap) - SideBar.gap / 2, y: geo.size.height / 2)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
         }
@@ -3549,6 +3569,7 @@ private struct PairChip: View {
     static var corner: CGFloat { SideBar.radius - PairRow.inset }
     /// The pair is on screen.
     let on: Bool
+    var titled = true
 
     @State private var hovering = false
     @Environment(\.tabTitleSize) private var titleSize
@@ -3575,7 +3596,7 @@ private struct PairChip: View {
             }
             if browser.editingTab == tab.id {
                 TabAddressField(browser: browser, tab: tab.id).frame(height: titleSize + 4)
-            } else {
+            } else if titled {
                 Text(tab.rowLabel)
                     .font(.system(size: titleSize))
                     .foregroundStyle(color)
@@ -3586,7 +3607,7 @@ private struct PairChip: View {
         }
         .padding(.horizontal, 6)
         .frame(height: PairRow.chipHeight)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: titled ? .leading : .center)
         .background {
             RoundedRectangle(cornerRadius: Self.corner, style: .continuous)
                 .fill(on ? chip : .clear)

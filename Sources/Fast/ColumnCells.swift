@@ -260,6 +260,8 @@ final class ColumnCell: NSHostingView<AnyView> {
             tab = ObjectIdentifier(first)
             other = ObjectIdentifier(second)
             lit = browser.newTabLit
+            // A pane come or gone redraws the row.
+            count = browser.pair(of: first.id)?.count ?? 2
         case .nest(let nest, let n, let pose):
             tab = ObjectIdentifier(nest)
             count = n
