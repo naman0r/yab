@@ -99,4 +99,46 @@ struct AgentLiveWindowTests {
             #expect(second.activeID == front)
         }
     }
+
+    /// An assistant's grant is checked in the window its call then runs in:
+    /// a tab of the second window on a site it may not open is refused, and
+    /// one it may use is worked in.
+    private func assistantCloses(never: [String], _ body: (_ said: [String: Any], _ checked: AssistantBoundary.Verdict, _ tab: Tab) throws -> Void) throws {
+        try closingTheFirst { first, second, _ in
+            let tab = try #require(second.tabs.first { $0.address?.host == "b.example.test" })
+            let session = Agents.shared.attach(name: "Grok Bot")
+            var grant = AssistantGrant(id: Assistants.newID(), name: "Grok Bot", client: "grok-bot", space: second.spaceID, made: Date())
+            grant.never = never
+            Assistants.shared.keep(grant)
+            session.assistant = grant.id
+            tab.allowed.insert(session.id)
+            defer {
+                tab.allowed.remove(session.id)
+                session.state = .done
+                Assistants.shared.remove(grant.id)
+            }
+            let bench = Bench()
+            bench.browser = first
+            let request: [String: Any] = ["do": "close", "session": session.id, "id": Bench.short(tab)]
+            var said: [String: Any] = [:]
+            bench.handle(request, yab: true) { said = $0 }
+            try body(said, AssistantBoundary.check(request, bench: bench, browser: second), tab)
+        }
+    }
+
+    @Test func anAssistantIsRefusedASecondWindowsTabOnASiteItMayNotOpen() throws {
+        try assistantCloses(never: ["b.example.test"]) { said, checked, _ in
+            guard case .refuse(let why) = checked else { Issue.record("the grant lets b.example.test through"); return }
+            #expect(said["error"] as? String == why)
+            #expect(said["handedBack"] == nil)
+        }
+    }
+
+    @Test func anAssistantWorksInASecondWindowsTabItMayUse() throws {
+        try assistantCloses(never: []) { said, _, tab in
+            #expect(said["error"] == nil)
+            #expect(said["handedBack"] as? Bool == true)
+            #expect(said["id"] as? String == Bench.short(tab))
+        }
+    }
 }
