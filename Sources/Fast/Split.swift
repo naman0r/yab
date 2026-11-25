@@ -1,8 +1,9 @@
 import SwiftUI
 import AppKit
 
-// Two tabs side by side in the window, or up to four, side by side,
-// stacked, or four in a grid, as Arc's Split View takes (#71, #522).
+// Two tabs side by side in the window, or one above the other; three as
+// one on the left and two stacked on the right; four as a 2x2 grid
+// (#71, #522).
 //
 // Both stay tabs like any other: in the row, in the session, in ⌃Tab's
 // grid and among the open pages ⌘T finds. The pair is only which two, in
@@ -23,35 +24,40 @@ import AppKit
 // outline (see StageView.hold), and given its new size once, when the
 // motion is over.
 
-/// Which two tabs, and the first one's share of the width; or up to four,
-/// laid side by side, stacked or in a grid.
+/// Which two tabs, and the first one's share of the width; or three or
+/// four, in a grid.
 struct Pair: Equatable, Codable {
     /// In the row's order: the first is the left half.
     var first: Tab.ID
     var second: Tab.ID
     /// The left half's share of the room the two have, the divider aside.
-    /// With more panes, where the first divider stands; in a grid, the one
-    /// between the columns.
+    /// Two stacked, the top one's share of the height; in a grid, the left
+    /// column's share of the width.
     var share: CGFloat = 0.5
     /// A third and a fourth pane, after `second` in the row. A Yab from
     /// before reads only the first two, and finds a pair.
     var more: [Tab.ID] = []
     var arrangement: Arrangement = .across
-    /// Where each divider after the first stands, as `share` does: down
-    /// the line, or in a grid the one between the rows.
+    /// In a grid, where the divider between the rows stands, as `share`
+    /// does: across the right column of three, across all of four.
     var cuts: [CGFloat] = []
 
     enum Arrangement: String, Codable {
-        /// Side by side, as a pair always was.
+        /// Two side by side, as a pair always was.
         case across
-        /// One above the other.
+        /// Two, one above the other.
         case stacked
-        /// Four, two above two.
+        /// Three or four: the first on the left, the second at upper right,
+        /// the third below it, the fourth below the first.
         case grid
     }
 
     /// Arc's Split View holds four.
     static let mostPanes = 4
+
+    /// How many of the column's rows a split's row takes: four stand in two
+    /// rows of chips.
+    static func rows(_ count: Int) -> Int { count == 4 ? 2 : 1 }
 
     var ids: [Tab.ID] { [first, second] + more }
     var count: Int { 2 + more.count }
@@ -79,27 +85,30 @@ struct Pair: Equatable, Codable {
         }
     }
 
+    /// Three or four are always laid as a grid; two side by side or stacked.
+    static func shape(_ count: Int, _ arrangement: Arrangement) -> Arrangement {
+        count > 2 ? .grid : arrangement == .grid ? .across : arrangement
+    }
+
     /// Even dividers for `count` panes laid so.
     static func even(_ count: Int, _ arrangement: Arrangement) -> [CGFloat] {
         arrangement == .grid ? [0.5, 0.5] : (1..<max(2, count)).map { CGFloat($0) / CGFloat(count) }
     }
 
     /// The same panes in these places, `ids` in order, laid so, the
-    /// dividers even; nil for fewer than two. A grid wants four.
+    /// dividers even; nil for fewer than two. Three or four are a grid.
     func with(_ ids: [Tab.ID], _ arrangement: Arrangement? = nil) -> Pair? {
         guard ids.count >= 2, ids.count <= Pair.mostPanes else { return nil }
-        var shape = arrangement ?? self.arrangement
-        if shape == .grid, ids.count != 4 { shape = .across }
+        let shape = Pair.shape(ids.count, arrangement ?? self.arrangement)
         let cuts = Pair.even(ids.count, shape)
         return Pair(first: ids[0], second: ids[1], share: cuts[0], more: Array(ids.dropFirst(2)), arrangement: shape, cuts: Array(cuts.dropFirst()))
     }
 
-    /// With `id` as one more pane, at the end; four side by side in a grid
-    /// when the room is too narrow for them.
-    func adding(_ id: Tab.ID, width: CGFloat = .infinity) -> Pair? {
+    /// With `id` as one more pane, at the end: a third at lower right, a
+    /// fourth below the first.
+    func adding(_ id: Tab.ID) -> Pair? {
         guard !contains(id), count < Pair.mostPanes else { return nil }
-        let shape: Arrangement = arrangement == .across && count + 1 == 4 && width < Pair.room(4, .across) ? .grid : arrangement
-        return with(ids + [id], shape)
+        return with(ids + [id])
     }
 
     /// The same split with its tabs changed by `place`: nil when either of
@@ -352,6 +361,14 @@ extension Browser {
             return pair.more.compactMap { id in row.tabs.first { $0.id == id } }
         }
         return []
+    }
+
+    /// How many of the column's rows a tab's own row takes: one; none for a
+    /// pane after its split's first, whose row is the first's; two for the
+    /// first of four.
+    func rowsTaken(by id: Tab.ID) -> Int {
+        guard let pair = pair(of: id) else { return 1 }
+        return pair.first == id ? Pair.rows(pair.count) : 0
     }
 
     /// The other tabs of the split `id` is in, in the row's order.
@@ -1258,7 +1275,7 @@ extension Browser {
     /// one beside a lone page can (`canCarry`).
     func canAdd(_ tab: Tab, to pair: Pair) -> Bool {
         guard pairs.contains(pair), !pair.contains(tab.id), pinPair(of: pair.first) == nil,
-              let next = pair.adding(tab.id, width: splitBook.place.width),
+              let next = pair.adding(tab.id),
               splitBook.place.width >= Pair.room(next.count, next.arrangement),
               !tab.bench, !folderBook.theirs(tab), self.pair(of: tab.id) == nil,
               tabs.contains(where: { $0.id == tab.id }), tab.address != nil else { return false }
@@ -1272,7 +1289,7 @@ extension Browser {
         guard canAdd(given, to: pair) else { return }
         settleNow()
         let tab = carried(given)
-        guard let index = pairs.firstIndex(of: pair), let next = pair.adding(tab.id, width: splitBook.place.width),
+        guard let index = pairs.firstIndex(of: pair), let next = pair.adding(tab.id),
               let last = self.tab(id: pair.ids[pair.ids.count - 1]) else { return }
         Teach.shared.used(.split)
         cancelTabEdit()
@@ -1304,11 +1321,11 @@ extension Browser {
         rememberSplit()
     }
 
-    /// Whether the split can be laid this way: a grid for four, and room
-    /// across for every pane side by side. A pinned pair's square holds
-    /// two side by side.
+    /// Whether the split can be laid this way: two side by side or
+    /// stacked; three and four have their grid alone. A pinned pair's
+    /// square holds two side by side.
     func canArrange(_ pair: Pair, _ arrangement: Pair.Arrangement) -> Bool {
-        pair.arrangement != arrangement && (arrangement != .grid || pair.count == 4) && pairs.contains(pair)
+        pair.count == 2 && arrangement != .grid && pair.arrangement != arrangement && pairs.contains(pair)
             && pinPair(of: pair.first) == nil && splitBook.place.width >= Pair.room(pair.count, arrangement)
     }
 
@@ -1421,15 +1438,11 @@ extension Browser {
 
     /// A divider of three or four panes, or of two stacked, in the hand:
     /// every divider's place, kept to what each pane needs. Never by
-    /// SplitRule's layers, which know two halves.
+    /// SplitRule's layers, which know two halves. A grid's column and row
+    /// dividers never meet along a line, so neither pushes the other.
     func dragCuts(to cuts: [CGFloat]) {
         guard let pair = stagePair else { return }
-        // The divider in the hand is the one moved from where they were
-        // taken: it pushes those before it back as it pushes those after on.
-        let grabbed = splitDrag.grabbedCuts ?? pair.allCuts
-        let moving = zip(grabbed, cuts).enumerated().first { abs($0.element.0 - $0.element.1) > 0.0001 }?.offset
-        let pushed = moving.map { SplitLayout.pushed(cuts, back: $0, pair.count, pair.arrangement, in: splitBook.place.size) } ?? cuts
-        let cuts = SplitLayout.held(pushed, pair.count, pair.arrangement, in: splitBook.place.size)
+        let cuts = SplitLayout.held(cuts, pair.count, pair.arrangement, in: splitBook.place.size)
         if splitDrag.armed {
             if splitDrag.cuts != cuts { splitDrag.cuts = cuts }
         } else {
@@ -1694,17 +1707,26 @@ struct SplitLayout: Layout {
     /// along the room the panes have, none narrower than `narrowest` or
     /// shorter than `lowest` where there is the room, even where there
     /// isn't; in a grid, one divider between the columns and one between
-    /// the rows, the panes left to right and then down.
+    /// the rows: of three, the first on the left, the second at upper
+    /// right and the third below it, the row divider across the right
+    /// column; of four, the fourth below the first, the row divider across
+    /// both, so no pane moves as a fourth comes or goes.
     static func panes(_ count: Int, _ arrangement: Pair.Arrangement, cuts: [CGFloat], in bounds: CGRect) -> (panes: [CGRect], cuts: [CGRect]) {
         let count = max(1, count)
-        if arrangement == .grid, count == 4 {
+        if arrangement == .grid, count >= 3 {
             let xs = line(2, cuts.first ?? 0.5, length: bounds.width, least: Pair.narrowest)
             let ys = line(2, cuts.dropFirst().first ?? 0.5, length: bounds.height, least: Pair.lowest)
-            var panes: [CGRect] = []
-            for y in ys.spans { for x in xs.spans { panes.append(CGRect(x: bounds.minX + x.lowerBound, y: bounds.minY + y.lowerBound, width: x.upperBound - x.lowerBound, height: y.upperBound - y.lowerBound)) } }
+            let cell = { (x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>) in
+                CGRect(x: bounds.minX + x.lowerBound, y: bounds.minY + y.lowerBound, width: x.upperBound - x.lowerBound, height: y.upperBound - y.lowerBound)
+            }
+            let (left, right) = (xs.spans[0], xs.spans[1])
+            let (top, bottom) = (ys.spans[0], ys.spans[1])
+            let whole = CGFloat(0)...bounds.height
             let column = xs.gaps[0], row = ys.gaps[0]
-            return (panes, [CGRect(x: bounds.minX + column.lowerBound, y: bounds.minY, width: column.upperBound - column.lowerBound, height: bounds.height),
-                            CGRect(x: bounds.minX, y: bounds.minY + row.lowerBound, width: bounds.width, height: row.upperBound - row.lowerBound)])
+            let panes = count == 3 ? [cell(left, whole), cell(right, top), cell(right, bottom)]
+                : [cell(left, top), cell(right, top), cell(right, bottom), cell(left, bottom)]
+            let across = count == 3 ? right : CGFloat(0)...bounds.width
+            return (panes, [cell(column, whole), cell(across, row)])
         }
         let across = arrangement != .stacked
         let laid = line(count, cuts, length: across ? bounds.width : bounds.height, least: across ? Pair.narrowest : Pair.lowest)
@@ -1745,31 +1767,15 @@ struct SplitLayout: Layout {
         return (spans, gaps)
     }
 
-    /// The dividers before `back` moved back far enough to leave each pane
-    /// its least, as `line` moves those after it on. A grid's two never
-    /// meet.
-    static func pushed(_ cuts: [CGFloat], back: Int, _ count: Int, _ arrangement: Pair.Arrangement, in size: CGSize) -> [CGFloat] {
-        guard arrangement != .grid, cuts.indices.contains(back), back > 0 else { return cuts }
-        let length = arrangement == .stacked ? size.height : size.width
-        let gap = min(Pair.gap, max(0, length) / CGFloat(max(1, count)))
-        let room = max(1, length - gap * CGFloat(count - 1))
-        let floor = arrangement == .stacked ? Pair.lowest : Pair.narrowest
-        let least = min(room / CGFloat(count), max(floor, count == 2 ? room * Pair.least : 0)) / room
-        var cuts = cuts
-        cuts[back] = max(cuts[back], CGFloat(back + 1) * least)
-        for at in stride(from: back - 1, through: 0, by: -1) { cuts[at] = min(cuts[at], cuts[at + 1] - least) }
-        return cuts
-    }
-
     /// The dividers' places as a room this big shows them, kept to what each
     /// pane needs: what a divider let go of stays where it was drawn.
     static func held(_ cuts: [CGFloat], _ count: Int, _ arrangement: Pair.Arrangement, in size: CGSize) -> [CGFloat] {
         let bounds = CGRect(origin: .zero, size: size)
         let laid = panes(count, arrangement, cuts: cuts, in: bounds)
         guard size.width > 0, size.height > 0, laid.cuts.count == cuts.count else { return cuts }
-        if arrangement == .grid, count == 4 {
+        if arrangement == .grid, count >= 3 {
             let width = max(1, size.width - laid.cuts[0].width), height = max(1, size.height - laid.cuts[1].height)
-            return [laid.panes[0].width / width, laid.panes[0].height / height]
+            return [laid.panes[0].width / width, laid.panes[1].height / height]
         }
         let across = arrangement != .stacked
         let length = max(1, (across ? size.width : size.height) - laid.cuts.reduce(0) { $0 + (across ? $1.width : $1.height) })

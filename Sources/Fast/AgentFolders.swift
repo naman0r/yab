@@ -1039,7 +1039,7 @@ final class Folders: ObservableObject {
                     continue
                 }
                 tabs[tab.id] = slot
-                if each.shown { slot += 1 }
+                if each.shown { slot += rows(tab) }
                 continue
             }
             for key in each.keys where made[key] == nil {
@@ -1047,7 +1047,7 @@ final class Folders: ObservableObject {
                 slot += 1
             }
             tabs[tab.id] = sharedSlot ?? slot
-            if each.shown, sharedSlot == nil { slot += 1 }
+            if each.shown, sharedSlot == nil { slot += rows(tab) }
             if tab.id != out, let more = places[tab.id]?.more, more > 0 { slot += 1 }
             // The empty ones at the end of each folder that ends here, the
             // deepest first, while it is open and its row drawn.
@@ -1070,6 +1070,10 @@ final class Folders: ObservableObject {
         for nest in todayBlock { made[nest.key] = slot; slot += 1 }
         return (tabs, made)
     }
+
+    /// The slots a tab's own row takes: one, or two for the first of a
+    /// split of four, whose chips stand in two rows (PairRow).
+    private func rows(_ tab: Tab) -> Int { max(1, browser?.rowsTaken(by: tab.id) ?? 1) }
 
     /// The kept tabs in folders of yours that are open, as Arc's pinned
     /// tab is from its first click until its minus or ⌘W: opened since the
@@ -1328,14 +1332,14 @@ final class Folders: ObservableObject {
             }
             guard let place = places[tab.id] else {
                 if joined, let last, let pair = browser?.pair(of: tab.id), pair.first != tab.id, pair.contains(last) { continue }
-                if !away.contains(tab.id) { slot += 1 }
+                if !away.contains(tab.id) { slot += rows(tab) }
                 continue
             }
             for key in place.bare ? [] : place.chain.isEmpty ? [place.folder] : place.chain where first[key] == nil {
                 first[key] = at
                 slot += 1
             }
-            if place.shown { slot += 1 }
+            if place.shown { slot += rows(tab) }
             if place.more > 0 { slot += 1 }
             for key in place.chain where ends[key] == at && key != carried && folder(key)?.nest?.open == true {
                 slot += trail[key]?.count ?? 0
@@ -1509,14 +1513,14 @@ final class Folders: ObservableObject {
                 standsOver[at] = nests.count
             }
             guard let place = places[tab.id] else {
-                if !away.contains(tab.id), !second(tab, placed: false) { slot += 1 }
+                if !away.contains(tab.id), !second(tab, placed: false) { slot += rows(tab) }
                 continue
             }
             for key in place.chain where first[key] == nil {
                 first[key] = at
                 slot += 1
             }
-            if place.shown, !second(tab, placed: true) { slot += 1 }
+            if place.shown, !second(tab, placed: true) { slot += rows(tab) }
             if place.more > 0 { slot += 1 }
             for key in place.chain where ends[key] == at && folder(key)?.nest?.open == true {
                 slot += trail[key]?.filter { $0.key != carried }.count ?? 0

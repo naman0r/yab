@@ -285,11 +285,12 @@ enum ColumnLayout {
         let dusted = browser.dustFolded, dustedRows = browser.dustFoldedRows
         var items: [ColumnItem] = []
         var y: CGFloat = 0
-        func add(_ id: String, _ kind: ColumnItem.Kind, indent: CGFloat, shown: Bool = true, folded: Bool = false) {
+        // `rows`: a split of four's row is two of the column's rows tall.
+        func add(_ id: String, _ kind: ColumnItem.Kind, indent: CGFloat, shown: Bool = true, folded: Bool = false, rows: Int = 1) {
             let lined = if case .line = kind { true } else { false }
-            let height = shown && !folded ? (lined ? SideBar.line : SideBar.row) : 0
+            let height = shown && !folded ? (lined ? SideBar.line : PairRow.height(rows: rows)) : 0
             items.append(ColumnItem(id: id, kind: kind, indent: indent, y: y, height: height))
-            if folded { y += SideBar.gap } else if shown { y += lined ? lineStep : step }
+            if folded { y += SideBar.gap } else if shown { y += lined ? lineStep : step * CGFloat(rows) }
         }
         for cell in cells {
             switch cell {
@@ -321,7 +322,7 @@ enum ColumnLayout {
                     let indent = place == nil ? 0 : CGFloat(place?.depth ?? 0) * Folders.indent
                     let folded = shape.folded.contains(tab.id)
                     if joined, let other = browser.partner(of: tab), browser.pair(of: tab.id)?.first == tab.id {
-                        add(tab.id.uuidString, .pair(tab, other), indent: indent, folded: folded)
+                        add(tab.id.uuidString, .pair(tab, other), indent: indent, folded: folded, rows: browser.rowsTaken(by: tab.id))
                     } else {
                         add(tab.id.uuidString, .tab(tab), indent: indent, folded: folded)
                     }
@@ -446,16 +447,16 @@ enum ColumnLayout {
         let coming = PagedSpace.Coming.items(loose, active: row.active, open: folders.open, whole: folders.whole, empty: empty, shut: shut, partner: partner)
         var items: [ColumnItem] = []
         var y: CGFloat = 0
-        func add(_ id: String, _ kind: ColumnItem.Kind, indent: CGFloat) {
+        func add(_ id: String, _ kind: ColumnItem.Kind, indent: CGFloat, rows: Int = 1) {
             let lined = if case .line = kind { true } else { false }
-            items.append(ColumnItem(id: id, kind: kind, indent: indent, y: y, height: lined ? SideBar.line : SideBar.row))
-            y += lined ? lineStep : step
+            items.append(ColumnItem(id: id, kind: kind, indent: indent, y: y, height: lined ? SideBar.line : PairRow.height(rows: rows)))
+            y += lined ? lineStep : step * CGFloat(rows)
         }
         for item in coming {
             switch item {
             case .tab(let tab, let depth):
                 if let pair = row.pairs.first(where: { $0.first == tab.id }), let other = row.tabs.first(where: { $0.id == pair.second }) {
-                    add(tab.id.uuidString, .pair(tab, other), indent: CGFloat(depth) * Folders.indent)
+                    add(tab.id.uuidString, .pair(tab, other), indent: CGFloat(depth) * Folders.indent, rows: Pair.rows(pair.count))
                 } else if !row.pairs.contains(where: { $0.contains(tab.id) && $0.first != tab.id }) {
                     add(tab.id.uuidString, .tab(tab), indent: CGFloat(depth) * Folders.indent)
                 }

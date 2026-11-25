@@ -2,9 +2,9 @@ import Foundation
 import Testing
 @testable import Fast
 
-// Three or four tabs in one split, side by side, stacked or in a grid (#71,
-// #522, #1054): the model, the frames each arrangement lays, the dividers
-// in the hand, and a session written by a Yab that knew only pairs.
+// Two tabs side by side or stacked, three as one beside two stacked, four as
+// a 2x2 grid (#71, #522, #1054): the model, the frames each lays, the
+// dividers in the hand, and a session written by a Yab that knew only pairs.
 struct SplitPanesTests {
     static let ids = (0..<8).map { _ in UUID() }
     static var made: [Int: UUID] { Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.offset, $0.element) }) }
@@ -15,24 +15,61 @@ struct SplitPanesTests {
         let pair = Pair(first: id[0], second: id[1], share: 0.3)
         #expect(pair.halves && pair.count == 2)
         let three = pair.adding(id[2])!
-        #expect(three.ids == [id[0], id[1], id[2]] && three.arrangement == .across && !three.halves)
-        #expect(three.allCuts.map { ($0 * 3).rounded() } == [1, 2])
-        // Wide enough: four side by side; narrower, a grid.
-        #expect(three.adding(id[3])?.arrangement == .across)
-        let grid = three.adding(id[3], width: 1200)!
-        #expect(grid.arrangement == .grid && grid.allCuts == [0.5, 0.5])
-        #expect(grid.adding(id[4]) == nil)
+        #expect(three.ids == [id[0], id[1], id[2]] && three.arrangement == .grid && !three.halves)
+        #expect(three.allCuts == [0.5, 0.5])
+        let four = three.adding(id[3])!
+        #expect(four.arrangement == .grid && four.allCuts == [0.5, 0.5])
+        #expect(four.adding(id[4]) == nil)
         #expect(three.adding(id[1]) == nil)
-        // A pane out: the rest, evenly; a grid of three is side by side.
-        let back = grid.removing(id[1])!
-        #expect(back.ids == [id[0], id[2], id[3]] && back.arrangement == .across)
+        // A pane out: the rest, evenly; two left, side by side as a pair.
+        let back = four.removing(id[1])!
+        #expect(back.ids == [id[0], id[2], id[3]] && back.arrangement == .grid)
         let two = back.removing(id[2])!
         #expect(two.ids == [id[0], id[3]] && two.halves && two.share == 0.5)
         #expect(two.removing(id[0]) == nil)
-        // Stacked stays stacked as panes come and go.
+        // Two stacked take a third into the grid, and are side by side again
+        // when it leaves: stacked is a choice for two.
         let stacked = pair.with(pair.ids, .stacked)!
-        #expect(stacked.adding(id[2])?.arrangement == .stacked)
-        #expect(stacked.adding(id[2])?.removing(id[0])?.arrangement == .stacked)
+        #expect(stacked.arrangement == .stacked && stacked.adding(id[2])?.arrangement == .grid)
+        #expect(stacked.adding(id[2])?.removing(id[2])?.halves == true)
+    }
+
+    // Three: the first on the left, the second at upper right, the third
+    // below it, in that order whatever was in front; one layout only.
+    @Test func threeStandOneBesideTwoStacked() {
+        let id = Self.ids, room = Self.room
+        let three = Pair(first: id[0], second: id[1]).adding(id[2])!
+        #expect(three.arrangement == .grid && three.ids == [id[0], id[1], id[2]])
+        let laid = SplitLayout.panes(3, three.arrangement, cuts: three.allCuts, in: room)
+        let (left, upper, lower) = (laid.panes[0], laid.panes[1], laid.panes[2])
+        #expect(left.minX == room.minX && left.minY == room.minY && left.height == room.height)
+        #expect(upper.minX > left.maxX && upper.minY == room.minY && upper.maxX == room.maxX)
+        #expect(lower.minX == upper.minX && lower.width == upper.width && lower.minY > upper.maxY && lower.maxY == room.maxY)
+        // The divider between the columns runs the whole height; the one
+        // between the two on the right runs across the right column only.
+        #expect(laid.cuts.count == 2)
+        #expect(laid.cuts[0].height == room.height && laid.cuts[0].minX == left.maxX)
+        #expect(laid.cuts[1].minX == upper.minX && laid.cuts[1].maxX == room.maxX && laid.cuts[1].minY == upper.maxY)
+        // Asked for side by side or stacked, three are still the grid.
+        #expect(Pair(first: id[0], second: id[1]).with([id[0], id[1], id[2]], .across)?.arrangement == .grid)
+        #expect(Pair(first: id[0], second: id[1]).with([id[0], id[1], id[2]], .stacked)?.arrangement == .grid)
+    }
+
+    // Four: always the 2x2, however wide the room; the fourth below the
+    // first, so the third stays at lower right as it came in.
+    @Test(arguments: [1200.0, 1600, 2400, 3200])
+    func fourAreAlwaysTwoByTwo(width: Double) {
+        let id = Self.ids
+        let room = CGRect(x: 0, y: 0, width: width, height: 900)
+        let four = Pair(first: id[0], second: id[1]).adding(id[2])!.adding(id[3])!
+        #expect(four.arrangement == .grid)
+        let laid = SplitLayout.panes(4, four.arrangement, cuts: four.allCuts, in: room).panes
+        let three = SplitLayout.panes(3, .grid, cuts: [0.5, 0.5], in: room).panes
+        #expect(laid[0].minX == room.minX && laid[0].minY == room.minY && laid[0].maxY < laid[3].minY)
+        #expect(laid[1].minY == room.minY && laid[1].maxX == room.maxX)
+        #expect(laid[2] == three[2])
+        #expect(laid[3].minX == room.minX && laid[3].maxY == room.maxY)
+        #expect(Set(laid.map { "\($0.width)x\($0.height)" }).count <= 2)
     }
 
     @Test func otherThanGoesRoundThePanes() {
@@ -48,12 +85,12 @@ struct SplitPanesTests {
 
     @Test func mapsEveryPane() {
         let id = Self.ids
-        let three = Pair(first: id[0], second: id[1], share: 0.2, more: [id[2]], arrangement: .stacked, cuts: [0.7])
+        let three = Pair(first: id[0], second: id[1], share: 0.2, more: [id[2]], arrangement: .grid, cuts: [0.7])
         let moved = three.mapped { id.firstIndex(of: $0).map { Self.ids[$0 + 4] } }!
-        #expect(moved.ids == [id[4], id[5], id[6]] && moved.arrangement == .stacked && moved.allCuts == [0.2, 0.7])
-        // A pane past the first two gone: the rest, evenly.
+        #expect(moved.ids == [id[4], id[5], id[6]] && moved.arrangement == .grid && moved.allCuts == [0.2, 0.7])
+        // A pane past the first two gone: the rest, evenly, a pair.
         let lost = three.mapped { $0 == id[2] ? nil : $0 }!
-        #expect(lost.ids == [id[0], id[1]] && lost.share == 0.5 && lost.arrangement == .stacked)
+        #expect(lost.ids == [id[0], id[1]] && lost.share == 0.5 && lost.halves)
         #expect(three.mapped { $0 == id[0] ? nil : $0 } == nil)
     }
 
@@ -76,9 +113,10 @@ struct SplitPanesTests {
             Session.Pair(first: 5, second: 6, share: 0.5, more: [2], arrangement: "sideways", cuts: nil),
         ], made: Self.made)
         // The first's own tab again, one not there, then two past the most:
-        // two panes kept, laid evenly, as the cuts didn't fit.
+        // two panes kept, laid as the grid four always are, evenly, as the
+        // cuts didn't fit.
         #expect(pairs[0].ids == [Self.ids[0], Self.ids[1], Self.ids[2], Self.ids[3]])
-        #expect(pairs[0].arrangement == .stacked && pairs[0].allCuts == Pair.even(4, .stacked))
+        #expect(pairs[0].arrangement == .grid && pairs[0].allCuts == [0.5, 0.5])
         // A pane another split took, and an arrangement unknown: a pair.
         #expect(pairs[1].halves && pairs[1].ids == [Self.ids[5], Self.ids[6]])
     }
@@ -116,65 +154,65 @@ struct SplitPanesTests {
         }
     }
 
-    @Test(arguments: [(3, Pair.Arrangement.across), (4, .across), (2, .stacked), (3, .stacked), (4, .stacked), (4, .grid)])
+    @Test(arguments: [(2, Pair.Arrangement.stacked), (3, .grid), (4, .grid)])
     func framesTileTheRoom(count: Int, arrangement: Pair.Arrangement) {
         let room = Self.room
         let laid = SplitLayout.panes(count, arrangement, cuts: Pair.even(count, arrangement), in: room)
         #expect(laid.panes.count == count)
         #expect(laid.cuts.count == (arrangement == .grid ? 2 : count - 1))
         let area = laid.panes.reduce(0) { $0 + $1.width * $1.height }
-        let gaps = laid.cuts.reduce(0) { $0 + $1.width * $1.height } - (arrangement == .grid ? Pair.gap * Pair.gap : 0)
+        let gaps = laid.cuts.reduce(0) { $0 + $1.width * $1.height } - (count == 4 ? Pair.gap * Pair.gap : 0)
         #expect(abs(area + gaps - room.width * room.height) < 0.5)
         for pane in laid.panes { #expect(room.contains(pane)) }
         for (a, pane) in laid.panes.enumerated() {
             for other in laid.panes.dropFirst(a + 1) { #expect(!pane.intersects(other)) }
         }
-        // Even: every pane alike.
-        #expect(Set(laid.panes.map { "\($0.width)x\($0.height)" }).count <= 2)
+        // Even: the panes alike, but three's tall one on the left.
+        #expect(Set(laid.panes.map { "\($0.width)x\($0.height)" }).count <= (count == 3 ? 3 : 2))
         switch arrangement {
         case .across:
             #expect(laid.panes.map(\.minX) == laid.panes.map(\.minX).sorted() && laid.panes.allSatisfy { $0.height == room.height })
         case .stacked:
             #expect(laid.panes.map(\.minY) == laid.panes.map(\.minY).sorted() && laid.panes.allSatisfy { $0.width == room.width })
         case .grid:
-            #expect(laid.panes[0].minY == laid.panes[1].minY && laid.panes[2].minY == laid.panes[3].minY)
-            #expect(laid.panes[0].minX == laid.panes[2].minX && laid.panes[1].maxX == room.maxX && laid.panes[3].maxY == room.maxY)
+            #expect(laid.panes[0].minY == laid.panes[1].minY && laid.panes[1].maxX == room.maxX && laid.panes[2].maxY == room.maxY)
+            if count == 4 { #expect(laid.panes[3].minX == laid.panes[0].minX && laid.panes[2].minY == laid.panes[3].minY) }
         }
     }
 
     @Test func dividersKeepEveryPaneItsLeast() {
         let room = Self.room
-        // Three across, the first divider dragged far right: it pushes the
-        // second along, and every pane keeps the narrowest a pane may be.
-        let pushed = SplitLayout.panes(3, .across, cuts: [0.95, 0.96], in: room).panes
-        #expect(pushed.allSatisfy { $0.width >= Pair.narrowest })
-        // Stacked, dragged to the top: the top pane keeps the lowest.
-        let top = SplitLayout.panes(3, .stacked, cuts: [0.0, 0.5], in: room).panes
-        #expect(top[0].height == Pair.lowest)
+        // Three, the column divider far right and the right column's far up:
+        // every pane keeps the narrowest a pane may be, and the lowest.
+        let pushed = SplitLayout.panes(3, .grid, cuts: [0.95, 0.02], in: room).panes
+        #expect(pushed.allSatisfy { $0.width >= Pair.narrowest && $0.height >= Pair.lowest })
+        // Two stacked, dragged to the top: the top pane keeps a quarter, as
+        // two halves do, and never less than the lowest.
+        let top = SplitLayout.panes(2, .stacked, cuts: [0.0], in: room).panes
+        #expect(top[0].height == max(Pair.lowest, ((room.height - Pair.gap) * Pair.least).rounded()))
         // A room short of three, laid evenly, never a negative size.
         for width: CGFloat in [0, 5, 400] {
-            let tight = SplitLayout.panes(3, .across, cuts: [0.1, 0.2], in: CGRect(x: 0, y: 0, width: width, height: 300))
+            let tight = SplitLayout.panes(3, .grid, cuts: [0.1, 0.2], in: CGRect(x: 0, y: 0, width: width, height: 300))
             #expect(tight.panes.allSatisfy { $0.width >= 0 } && tight.cuts.allSatisfy { $0.width >= 0 })
         }
     }
 
     @Test func heldCutsAreWhereTheDividersWereDrawn() {
         let size = Self.room.size
-        let held = SplitLayout.held([0.95, 0.96], 3, .across, in: size)
-        let again = SplitLayout.panes(3, .across, cuts: held, in: CGRect(origin: .zero, size: size)).panes
-        let first = SplitLayout.panes(3, .across, cuts: [0.95, 0.96], in: CGRect(origin: .zero, size: size)).panes
-        #expect(zip(again, first).allSatisfy { abs($0.width - $1.width) <= 1 })
-        #expect(held[0] < held[1] && held[1] < 1)
+        let held = SplitLayout.held([0.95, 0.96], 3, .grid, in: size)
+        let again = SplitLayout.panes(3, .grid, cuts: held, in: CGRect(origin: .zero, size: size)).panes
+        let first = SplitLayout.panes(3, .grid, cuts: [0.95, 0.96], in: CGRect(origin: .zero, size: size)).panes
+        #expect(zip(again, first).allSatisfy { abs($0.width - $1.width) <= 1 && abs($0.height - $1.height) <= 1 })
+        #expect(held.allSatisfy { $0 > 0 && $0 < 1 })
         let grid = SplitLayout.held([0.2, 0.9], 4, .grid, in: size)
         #expect(grid.count == 2 && grid.allSatisfy { $0 > 0 && $0 < 1 })
     }
 
     @Test func topPanes() {
         let id = Self.ids
-        let three = Pair(first: id[0], second: id[1], more: [id[2]])
-        #expect(three.topPane(right: true) == id[2] && three.topPane(right: false) == id[0])
-        var stacked = three
-        stacked.arrangement = .stacked
+        let three = Pair(first: id[0], second: id[1], more: [id[2]], arrangement: .grid)
+        #expect(three.topPane(right: true) == id[1] && three.topPane(right: false) == id[0])
+        let stacked = Pair(first: id[0], second: id[1], arrangement: .stacked)
         #expect(stacked.topPane(right: true) == id[0])
         let grid = Pair(first: id[0], second: id[1], more: [id[2], id[3]], arrangement: .grid)
         #expect(grid.topPane(right: true) == id[1] && grid.topPane(right: false) == id[0])
@@ -274,11 +312,16 @@ struct SplitPanesBrowserTests {
         let (browser, id) = window()
         defer { forget(id) }
         let tabs = open(browser, 5)
-        let three = Pair(first: tabs[0].id, second: tabs[1].id, more: [tabs[2].id])
-        browser.pairs.append(three)
-        #expect(browser.canArrange(three, .stacked) && !browser.canArrange(three, .grid) && !browser.canArrange(three, .across))
-        browser.arrange(three, .stacked)
+        let two = Pair(first: tabs[0].id, second: tabs[1].id)
+        browser.pairs.append(two)
+        #expect(browser.canArrange(two, .stacked) && !browser.canArrange(two, .grid) && !browser.canArrange(two, .across))
+        browser.arrange(two, .stacked)
         #expect(browser.pair(of: tabs[0].id)?.arrangement == .stacked)
+        // A third comes in as the grid; three and four offer no other layout.
+        browser.addPane(tabs[2], to: try #require(browser.pair(of: tabs[0].id)))
+        let three = try #require(browser.pair(of: tabs[0].id))
+        #expect(three.arrangement == .grid && three.count == 3)
+        for way in [Pair.Arrangement.across, .stacked, .grid] { #expect(!browser.canArrange(three, way)) }
         // A tab put between two panes: the panes come back together.
         var row = browser.tabs
         row.swapAt(2, 4)

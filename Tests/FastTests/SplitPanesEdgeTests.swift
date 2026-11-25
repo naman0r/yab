@@ -3,10 +3,10 @@ import Foundation
 import Testing
 @testable import Fast
 
-/// Three or four panes at their edges: a divider pushing those before it, the
-/// window and column keeping every pane its width, a third chip under the
-/// pointer, a split parked in a space sliding in, and what floats over the
-/// pane in front.
+/// Three or four panes at their edges: the grid's dividers keeping every pane
+/// its least, the window and column keeping every pane its width, a third chip
+/// under the pointer, a split parked in a space sliding in, what floats over
+/// the pane in front, and four's two rows in the column.
 @MainActor @Suite(.serialized)
 struct SplitPanesEdgeTests {
     private func window(_ count: Int) -> (Browser, UUID, [Tab]) {
@@ -32,30 +32,28 @@ struct SplitPanesEdgeTests {
         }
     }
 
-    @Test func aLaterDividerPushesTheOnesBeforeIt() async throws {
+    @Test func theGridsDividersKeepEveryPaneItsLeast() async throws {
         let (browser, id, tabs) = window(3)
         defer { forget(id) }
-        try await show(browser, Pair(first: tabs[0].id, second: tabs[1].id, share: 1.0 / 3, more: [tabs[2].id], cuts: [2.0 / 3]), front: tabs[0])
+        try await show(browser, Pair(first: tabs[0].id, second: tabs[1].id, more: [tabs[2].id], arrangement: .grid, cuts: [0.5]), front: tabs[0])
         browser.splitDrag.armed = true
-        browser.splitDrag.grabbedCuts = [1.0 / 3, 2.0 / 3]
-        // The second divider taken far left: the first goes back before it.
-        browser.dragCuts(to: [1.0 / 3, 0.2])
+        browser.splitDrag.grabbedCuts = [0.5, 0.5]
+        // The column divider far right, the right column's far up: each stops
+        // where its panes keep their least, and neither moves the other.
+        browser.dragCuts(to: [0.98, 0.01])
         let cuts = try #require(browser.splitDrag.cuts)
-        let panes = SplitLayout.panes(3, .across, cuts: cuts, in: browser.splitBook.place).panes
-        #expect(cuts[0] < 0.3 && cuts[1] < 0.5)
-        #expect(panes.allSatisfy { $0.width >= Pair.narrowest })
-        // The first taken right still pushes the second on, as before.
-        browser.dragCuts(to: [0.9, 2.0 / 3])
-        let on = try #require(browser.splitDrag.cuts)
-        #expect(on[1] > 2.0 / 3 && SplitLayout.panes(3, .across, cuts: on, in: browser.splitBook.place).panes.allSatisfy { $0.width >= Pair.narrowest })
+        let panes = SplitLayout.panes(3, .grid, cuts: cuts, in: browser.splitBook.place).panes
+        #expect(panes.allSatisfy { $0.width >= Pair.narrowest && $0.height >= Pair.lowest })
+        browser.dragCuts(to: [0.98, 0.5])
+        #expect(abs((browser.splitDrag.cuts?[1] ?? 0) - 0.5) < 0.01)
     }
 
     @Test func theColumnLeavesEveryPaneItsWidth() async throws {
         let (browser, id, tabs) = window(3)
         defer { forget(id) }
-        try await show(browser, Pair(first: tabs[0].id, second: tabs[1].id, more: [tabs[2].id]), front: tabs[0])
-        let three = 3 * Pair.narrowest + 2 * Pair.gap
-        #expect(browser.columnMost == browser.splitBook.place.width + browser.sideShown - three)
+        try await show(browser, Pair(first: tabs[0].id, second: tabs[1].id, more: [tabs[2].id], arrangement: .grid), front: tabs[0])
+        // Three: the left pane and the right column, each its least.
+        #expect(browser.columnMost == browser.splitBook.place.width + browser.sideShown - Pair.room)
         // Two side by side: as before.
         browser.leaveSplit(tabs[2].id)
         #expect(browser.stagePair?.halves == true)
@@ -92,10 +90,11 @@ struct SplitPanesEdgeTests {
         try await show(browser, Pair(first: tabs[0].id, second: tabs[1].id, more: [tabs[2].id, tabs[3].id], arrangement: .grid, cuts: [0.5]), front: tabs[3])
         let room = browser.splitBook.place
         let grid = SplitLayout.panes(4, .grid, cuts: [0.5, 0.5], in: room).panes
-        // Bottom right: down by the top row and the gap, nothing to its right.
+        // Bottom left: down by the top row and the gap, the right column
+        // to its right.
         let inset = try #require(browser.frontPaneInset())
         #expect(inset.top == grid[3].minY - room.minY && inset.top > 0)
-        #expect(inset.bottom == 0 && inset.trailing == 0)
+        #expect(inset.bottom == 0 && inset.trailing == room.maxX - grid[3].maxX)
         browser.focus(tabs[0])
         let topLeft = try #require(browser.frontPaneInset())
         #expect(topLeft.top == 0 && topLeft.bottom == room.maxY - grid[0].maxY && topLeft.trailing == room.maxX - grid[0].maxX)
@@ -104,4 +103,36 @@ struct SplitPanesEdgeTests {
         browser.removePane(tabs[2].id, from: try #require(browser.stagePair))
         #expect(browser.stagePair?.halves == true && browser.frontPaneInset() == nil)
     }
+
+    // Four's chips stand in two rows, in a row of the column as tall as two
+    // rows; three's and two's rows, and every other row, keep one row's
+    // height, and every row under it stays where its slot says.
+    @Test func fourTakeTwoRowsInTheColumnAndNothingElseGrows() {
+        let (browser, id, tabs) = window(9)
+        let folders = Folders(emptiesFile: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json"))
+        folders.browser = browser
+        defer { folders.browser = nil; forget(id) }
+        browser.pairs = [Pair(first: tabs[0].id, second: tabs[1].id, more: [tabs[2].id, tabs[3].id], arrangement: .grid),
+                         Pair(first: tabs[4].id, second: tabs[5].id, more: [tabs[6].id], arrangement: .grid)]
+        let items = ColumnLayout.live(browser, folders: folders).filter { $0.height > 0 }
+        let row = { (tab: Tab) in items.first { $0.id == tab.id.uuidString } }
+        let four = row(tabs[0]), three = row(tabs[4]), loose = row(tabs[7]), last = row(tabs[8])
+        #expect(four?.height == 2 * SideBar.row + SideBar.gap)
+        #expect(three?.height == SideBar.row && loose?.height == SideBar.row && last?.height == SideBar.row)
+        #expect(three.map(\.y) == four.map { $0.y + 2 * ColumnLayout.step })
+        #expect(loose.map(\.y) == three.map { $0.y + ColumnLayout.step })
+        for pane in [tabs[1], tabs[2], tabs[3], tabs[5], tabs[6]] { #expect(row(pane) == nil) }
+        // The drag's and folders' slots agree with what is drawn.
+        let slots = folders.slots(browser.tabs, joined: true)
+        #expect(slots.tabs[tabs[4].id] == slots.tabs[tabs[0].id].map { $0 + 2 })
+        for item in items {
+            guard let tab = item.tab, let slot = slots.tabs[tab.id] else { continue }
+            #expect(item.y == ColumnLayout.y(Double(slot), line: slots.folders[Folders.line]))
+        }
+        // The chips as the panes stand: the first and second above, the
+        // fourth below the first and the third below the second.
+        #expect(PairRow.chipRows(Array(tabs.prefix(4))).map { $0.map(\.id) } == [[tabs[0].id, tabs[1].id], [tabs[3].id, tabs[2].id]])
+        #expect(PairRow.chipRows(Array(tabs.prefix(3))).map { $0.map(\.id) } == [tabs.prefix(3).map(\.id)])
+    }
+
 }

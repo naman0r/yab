@@ -773,6 +773,8 @@ final class ColumnHand: NSObject {
         var row = -1
         return looseTabs.map { tab in
             if browser.pair(of: tab.id).map({ $0.first == tab.id }) ?? true { row += 1 }
+            // A split of four's row is two rows: the next one starts after both.
+            defer { if browser.rowsTaken(by: tab.id) == 2 { row += 1 } }
             return max(0, row)
         }
     }

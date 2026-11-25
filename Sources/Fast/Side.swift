@@ -585,7 +585,7 @@ struct SideBar: View {
     /// from what was drawn rather than measured: a measurement would arrive a
     /// frame late, and for one frame the whole column would drag the window.
     private var rowsEnd: CGFloat {
-        var rows = browser.tabs.count - browser.pinnedCount + folders.extra + (carry.map { $0.toPins ? -1 : 1 } ?? 0) - browser.pairs.reduce(0) { $0 + $1.count - 1 }
+        var rows = browser.tabs.count - browser.pinnedCount + folders.extra + (carry.map { $0.toPins ? -1 : 1 } ?? 0) - browser.pairs.reduce(0) { $0 + $1.count - Pair.rows($1.count) }
             + (lineComing == nil ? 0 : 1)
         if let herd, !herd.landed { rows -= herd.ids.count - (herd.index == nil ? 0 : 1) }
         // A split's panes past its first have no row of their own.
@@ -1060,6 +1060,8 @@ struct SideBar: View {
         var row = -1
         return looseTabs.map { tab in
             if browser.pair(of: tab.id).map({ $0.first == tab.id }) ?? true { row += 1 }
+            // A split of four's row is two rows: the next one starts after both.
+            defer { if browser.rowsTaken(by: tab.id) == 2 { row += 1 } }
             return max(0, row)
         }
     }
@@ -2276,7 +2278,7 @@ struct SideBar: View {
     /// Below the last row, or, with the column full of them, near its foot,
     /// where the space's capsule is.
     private func belowRows(_ y: CGFloat) -> Bool {
-        let rowsEnd = rowsTop + CGFloat(looseTabs.count + folders.extra - browser.pairs.reduce(0) { $0 + $1.count - 1 }
+        let rowsEnd = rowsTop + CGFloat(looseTabs.count + folders.extra - browser.pairs.reduce(0) { $0 + $1.count - Pair.rows($1.count) }
             + (folders.lined ? 0 : 1)) * (SideBar.row + SideBar.gap) + 8
         return y > min(rowsEnd, columnHeight - SideBar.footHeight - 24)
     }
@@ -3444,8 +3446,9 @@ struct PinPairMarks: View {
     }
 }
 
-/// Two tabs side by side down the column, or three or four: one row, each
-/// tab a chip in it, its mark and as much of its title as fits. On screen, the row wears the
+/// Two tabs side by side down the column, or three: one row, each tab a
+/// chip in it, its mark and as much of its title as fits. Four take two
+/// rows of chips, the item as tall as two rows. On screen, the row wears the
 /// live tab's gray, and both halves are chips lifted off it; at rest,
 /// only the hairline between the halves remains. A click on a chip is a
 /// click on that tab: the pair comes up with that half in front, or, the
@@ -3475,6 +3478,18 @@ struct PairRow: View {
     /// The narrowest chip with room for a mark and a few letters of title.
     static let titled: CGFloat = 72
 
+    /// The chips as the panes stand: four in two rows of two, the fourth
+    /// below the first and the third below the second; fewer in one row.
+    static func chipRows(_ all: [Tab]) -> [[Tab]] {
+        all.count == 4 ? [[all[0], all[1]], [all[3], all[2]]] : [all]
+    }
+
+    /// A split's row as tall as this many of the column's rows and the gaps
+    /// between them, so every row under it stays on the column's step.
+    static func height(rows: Int) -> CGFloat {
+        CGFloat(rows) * SideBar.row + CGFloat(max(0, rows - 1)) * SideBar.gap
+    }
+
     /// The panes past the second, of a split of three or four.
     private var more: [Tab] { browser.morePanes(of: first.id) }
 
@@ -3483,56 +3498,61 @@ struct PairRow: View {
         let pointed = hovering && !lifted
         let more = more
         let all = [first, second] + more
+        let rows = Self.chipRows(all)
         GeometryReader { geo in
-            let count = CGFloat(all.count)
+            let count = CGFloat(rows[0].count)
             let half = max(0, (geo.size.width - 2 * Self.inset - (count - 1) * SideBar.gap) / count)
             let end = pointed ? RowPlate.column.side + SideBar.gap : 0
-            HStack(spacing: SideBar.gap) {
-                // The first half stays put when the group button comes in;
-                // only the last gives it room, as in the Arc reference.
-                // Three or four in a narrow column: each its mark alone, as
-                // a title cut to its first letters reads as nothing.
-                let titled = half >= Self.titled
-                PairChip(browser: browser, prefs: prefs, tab: first, on: on, titled: titled)
-                    .frame(width: half)
-                PairChip(browser: browser, prefs: prefs, tab: second, on: on, titled: titled)
-                    .frame(width: max(0, half - (more.isEmpty ? end : 0)))
-                ForEach(more, id: \.id) { tab in
-                    PairChip(browser: browser, prefs: prefs, tab: tab, on: on, titled: titled)
-                        .frame(width: max(0, half - (tab === more.last ? end : 0)))
-                }
-                if pointed {
-                    TabEnd(browser: browser, tab: first, live: on, hovering: true, editing: false,
-                           tint: Palette.ink, speaker: false, close: { browser.shut(all) },
-                           unkeep: all.allSatisfy(\.kept) ? { browser.discard(all, rekept: true) } : nil,
-                           reach: SideBar.row, plate: .column, slotSide: 15)
-                        .frame(width: RowPlate.column.side, height: Self.chipHeight)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(first.kept && !first.putDown ? "Put Down Split View" : "Close Split View")
-                        .accessibilityAddTraits(.isButton)
-                        .accessibilityAction {
-                            browser.glance.drop()
-                            if all.allSatisfy({ $0.kept && $0.putDown }) {
-                                browser.discard(all, rekept: true)
-                            } else {
-                                browser.shut(all)
+            // Three in a narrow column: each its mark alone, as a title cut
+            // to its first letters reads as nothing.
+            let titled = half >= Self.titled
+            VStack(spacing: SideBar.gap) {
+                ForEach(rows.indices, id: \.self) { line in
+                    let last = line == rows.count - 1
+                    HStack(spacing: SideBar.gap) {
+                        // The first half stays put when the group button
+                        // comes in; only the last gives it room, as in the
+                        // Arc reference.
+                        ForEach(rows[line], id: \.id) { tab in
+                            PairChip(browser: browser, prefs: prefs, tab: tab, on: on, titled: titled)
+                                .frame(width: max(0, half - (last && tab === rows[line].last ? end : 0)))
+                        }
+                        if pointed, last {
+                            TabEnd(browser: browser, tab: first, live: on, hovering: true, editing: false,
+                                   tint: Palette.ink, speaker: false, close: { browser.shut(all) },
+                                   unkeep: all.allSatisfy(\.kept) ? { browser.discard(all, rekept: true) } : nil,
+                                   reach: SideBar.row, plate: .column, slotSide: 15)
+                                .frame(width: RowPlate.column.side, height: Self.chipHeight)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(first.kept && !first.putDown ? "Put Down Split View" : "Close Split View")
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityAction {
+                                    browser.glance.drop()
+                                    if all.allSatisfy({ $0.kept && $0.putDown }) {
+                                        browser.discard(all, rekept: true)
+                                    } else {
+                                        browser.shut(all)
+                                    }
+                                }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay {
+                        if !on {
+                            ForEach(1..<rows[line].count, id: \.self) { at in
+                                Rectangle().fill(Palette.ink.opacity(0.18))
+                                    .frame(width: 1, height: 16)
+                                    .position(x: CGFloat(at) * (half + SideBar.gap) - SideBar.gap / 2, y: Self.chipHeight / 2)
+                                    .allowsHitTesting(false)
                             }
                         }
-                }
-            }
-            .padding(Self.inset)
-            .overlay {
-                if !on {
-                    ForEach(1..<all.count, id: \.self) { at in
-                        Rectangle().fill(Palette.ink.opacity(0.18))
-                            .frame(width: 1, height: 16)
-                            .position(x: Self.inset + CGFloat(at) * (half + SideBar.gap) - SideBar.gap / 2, y: geo.size.height / 2)
-                            .allowsHitTesting(false)
                     }
                 }
             }
+            .padding(.horizontal, Self.inset)
+            .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(height: SideBar.row)
+        .frame(height: Self.height(rows: rows.count))
         .frame(maxWidth: .infinity)
         .background {
             if lifted {
