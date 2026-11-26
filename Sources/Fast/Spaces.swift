@@ -660,13 +660,16 @@ extension Browser {
         return order
     }
 
+    /// Whether swiping past the last space makes a new one.
+    var canSwipeNewSpace: Bool {
+        spacesShown && !blank
+    }
+
     /// Whether two fingers over the column have a space to go to: another
-    /// of yours with spaces on, or Mail's, which is gone in and out of with
-    /// spaces off too (switchSpace). With spaces off they did nothing in
-    /// Mail, nor into it (feedback #158).
+    /// of yours with spaces on, Mail's, or a new space past the last one.
     var swipesSpaces: Bool {
         let order = turnOrder
-        return order.count > 1 && (prefs.usesSpaces || order.contains { $0.id == Space.mailID })
+        return canSwipeNewSpace || (order.count > 1 && (prefs.usesSpaces || order.contains { $0.id == Space.mailID }))
     }
 
     /// Every tab of the spaces not on screen, for the sleep timer.
@@ -2057,7 +2060,8 @@ struct SpaceSwipe: NSViewRepresentable {
                     if mine, paging {
                         paging = false
                         let speed = SpacePaging.speed(recent.map { ($0.0, Double($0.1)) }, liftedAt: event.timestamp)
-                        MainActor.assumeIsolated { SpacePager.shared.release(speed: CGFloat(speed)) }
+                        let allowCreate = event.phase == .ended
+                        MainActor.assumeIsolated { SpacePager.shared.release(speed: CGFloat(speed), allowCreate: allowCreate) }
                         return nil
                     }
                     // Gone quiet before lifting is no flick.
@@ -2067,13 +2071,19 @@ struct SpaceSwipe: NSViewRepresentable {
                         let flick = flicked()
                         let travelled = travel
                         let way = travel < 0 ? 1 : -1
+                        let allowCreate = event.phase == .ended
                         MainActor.assumeIsolated {
                             let far = abs(travelled) / SpacePull.reach
                             guard far >= SpacePull.enough || (flick && far >= SpacePull.flickEnough) else { return }
                             let order = browser.turnOrder
                             // One space, never round past the ends, as the row goes.
-                            if let here = order.firstIndex(where: { $0.id == browser.spaceID }), order.indices.contains(here + way) {
-                                browser.switchSpace(to: order[here + way].id)
+                            if let here = order.firstIndex(where: { $0.id == browser.spaceID }) {
+                                if order.indices.contains(here + way) {
+                                    browser.switchSpace(to: order[here + way].id)
+                                } else if allowCreate, way == 1, here == order.count - 1,
+                                          browser.canSwipeNewSpace, far >= SpacePull.enough {
+                                    SpaceTray.open(browser)
+                                }
                             }
                         }
                         return nil

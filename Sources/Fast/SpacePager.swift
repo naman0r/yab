@@ -48,6 +48,8 @@ final class SpacePager {
     /// The color over the window while the fingers hold: the space they
     /// are taking it to, and how much of it shows.
     private var wash: (index: Int, opacity: Swift.Float)?
+    /// Whether the haptic tick for crossing the pull-to-open threshold has fired.
+    private var createTicked = false
     /// Set while a let-go switches the space itself, so the switch doesn't
     /// start a turn of its own.
     private var switching = false
@@ -161,7 +163,7 @@ final class SpacePager {
     /// Two fingers have begun sideways over the column, `event` the move
     /// they took the row with.
     func grab(_ browser: Browser, by event: NSEvent) -> Bool {
-        guard Self.allowed(browser), browser.turnOrder.count > 1 else { return false }
+        guard Self.allowed(browser), browser.turnOrder.count > 1 || browser.canSwipeNewSpace else { return false }
         // A landing still under way lands now; the fingers start from the
         // space it brought.
         ColumnSpaceCarry.of(browser)?.willPage()
@@ -169,6 +171,7 @@ final class SpacePager {
         guard raise(browser) else { return false }
         holding = true
         heldSince = event.timestamp
+        createTicked = false
         return true
     }
 
@@ -180,10 +183,23 @@ final class SpacePager {
     func follow(_ travel: CGFloat) {
         guard holding, let browser else { return }
         let back = home > 0, forward = home < order.count - 1
-        let x = CGFloat(SpacePaging.offset(travel: Double(travel), page: Double(page), back: back, forward: forward))
+        let canCreate = !forward && browser.canSwipeNewSpace
+        let x = CGFloat(SpacePaging.offset(travel: Double(travel), page: Double(page), back: back, forward: forward, create: canCreate))
         // The space it is going toward drawn beside it, its page woken.
         if x < 0, forward { build(home + 1) }
         if x > 0, back { build(home - 1) }
+        if canCreate {
+            let pull = max(0, -x)
+            let ready = SpacePaging.createReady(offset: Double(x), page: Double(page))
+            if ready, !createTicked {
+                createTicked = true
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            } else if Double(pull) < SpacePaging.createThreshold(page: Double(page)) - 8 {
+                createTicked = false
+            }
+            live?.updateNewSpace(pull: pull, ready: ready)
+            if stage != nil { updateStageNewSpace(browser, pull: pull, ready: ready) }
+        }
         let toward = x < 0 ? home + 1 : home - 1
         // Toward a space that shows the same pins they stand still, toward
         // one with others, or none, they go with their page; past the first
@@ -204,11 +220,13 @@ final class SpacePager {
     }
 
     /// The fingers have lifted, going `speed` points a second.
-    func release(speed: CGFloat) {
+    func release(speed: CGFloat, allowCreate: Bool = true) {
         guard holding, let browser else { return }
         holding = false
         let back = home > 0, forward = home < order.count - 1
         let to = SpacePaging.landing(offset: Double(offset), speed: Double(speed), page: Double(page), back: back, forward: forward)
+        let openNewSpace = allowCreate && !forward && browser.canSwipeNewSpace
+            && SpacePaging.triggersCreate(offset: Double(offset), speed: Double(speed), page: Double(page), create: true)
         let target = -CGFloat(to) * page
         SpaceSwipe.note("release offset=\(Int(offset)) speed=\(Int(speed)) to=\(to)")
         // The row goes on as fast as it was going, toward where it lands.
@@ -220,6 +238,7 @@ final class SpacePager {
                 browser.spaceWash.clear(paint, from: showing.opacity, spring: true)
             }
             animate(to: target, velocity: velocity)
+            if openNewSpace { SpaceTray.open(browser) }
             return
         }
         // Gone: the space comes at once, as Arc's page does, under a spring
@@ -337,10 +356,11 @@ final class SpacePager {
         return .no
     }
 
-    /// Let go where it is, as fingers lifted still.
+    /// Let go where it is, as fingers lifted still. Never creates a space on
+    /// an interrupted or lost gesture.
     private func lost(_ run: Int) {
         guard holding, generation == run else { return }
-        release(speed: 0)
+        release(speed: 0, allowCreate: false)
     }
 
     /// The column as SwiftUI lays it now: pages up over a card that has
@@ -1053,7 +1073,24 @@ final class SpacePager {
         return key
     }
 
+    private func updateStageNewSpace(_ browser: Browser, pull: CGFloat, ready: Bool) {
+        guard let stage else { return }
+        if stage.newSpaceView == nil, pull > 0 {
+            let painted = SpaceWash.grounded(in: browser)
+            let window = browser.column?.window
+            let appearance = window?.effectiveAppearance ?? NSApp.effectiveAppearance
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let own = floating || (browser.prefs.backdrop == .none && !browser.prefs.edgeBackdrop)
+            let baseTone = painted.map { Tone($0.color, lifted: true, glass: $0.glass) }
+            let tone = own ? baseTone?.card(painted) : baseTone
+            let scheme: ColorScheme = tone?.scheme ?? (dark ? .dark : .light)
+            stage.adoptNewSpace(tone: tone, scheme: scheme)
+        }
+        stage.updateNewSpace(pull: pull, ready: ready)
+    }
+
     private func paint(_ index: Int, _ browser: Browser) -> SpaceWash.Paint? {
+        guard order.indices.contains(index) else { return nil }
         let id = order[index]
         // Edge to edge, a card's spaces wear their own looks (SpaceWash.card).
         if id == Space.mailID { return SpaceWash.grounded(Space.mail.paint, in: browser) }
@@ -1104,6 +1141,7 @@ final class SpacePager {
         landings = 0
         holding = false
         pendingTarget = nil
+        createTicked = false
         if wash != nil {
             browser?.spaceWash.hide()
             wash = nil
@@ -1147,7 +1185,7 @@ final class SpacePager {
         if !(browser.prefs.usesSpaces || withMail(browser, toward: nil)) { return "no spaces" }
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return "reduce motion" }
         if SpaceTurn.still { return "still" }
-        if browser.turnOrder.count < 2 { return "one space" }
+        if browser.turnOrder.count < 2 && !browser.canSwipeNewSpace { return "one space" }
         if browser.rowsClip == nil { return "no rows clip" }
         if browser.spaceFloor == nil { return "no floor" }
         guard let band = column.spaceBand(browser) else { return "no band" }
@@ -1550,6 +1588,10 @@ final class PagerStage: NSView {
             view.frame = CGRect(x: band.minX + edge, y: band.minY + cut, width: band.width - 2 * edge, height: band.height - cut)
             view.bounds.origin = CGPoint(x: edge, y: cut)
         }
+        if let newSpaceView {
+            let side = NewSpacePullCue.side
+            newSpaceView.frame.origin.y = cut + (max(0, band.height - cut) - side) / 2
+        }
         CATransaction.commit()
     }
 
@@ -1653,6 +1695,41 @@ final class PagerStage: NSView {
         view.layer?.contentsGravity = .resize
         clip.addSubview(view)
         pages[index] = view
+    }
+
+    private(set) var newSpaceView: NSView?
+    private var newSpaceState: NewSpaceSlideState?
+
+    /// The pull-to-open `+` cue past the last space in the pictured row.
+    func adoptNewSpace(tone: Tone?, scheme: ColorScheme) {
+        guard newSpaceView == nil else { return }
+        let state = NewSpaceSlideState()
+        let side = NewSpacePullCue.side
+        let view = NewSpacePullCue(state: state)
+            .toned(tone)
+            .environment(\.colorScheme, scheme)
+        let host = Self.page(view)
+        let y = cut + (max(0, band.height - cut) - side) / 2
+        host.frame = CGRect(x: band.width + NewSpacePullCue.gap, y: y, width: side, height: side)
+        clip.addSubview(host)
+        host.layoutSubtreeIfNeeded()
+        newSpaceView = host
+        newSpaceState = state
+    }
+
+    func updateNewSpace(pull: CGFloat, ready: Bool) {
+        guard let view = newSpaceView else { return }
+        guard pull > 0 else {
+            view.isHidden = true
+            if let state = newSpaceState, state.ready { state.ready = false }
+            return
+        }
+        let side = NewSpacePullCue.side
+        view.isHidden = false
+        view.frame.origin.x = band.width + max(NewSpacePullCue.gap, (pull - side) / 2)
+        view.frame.origin.y = cut + (max(0, band.height - cut) - side) / 2
+        view.alphaValue = min(1, pull / 32)
+        if let state = newSpaceState, state.ready != ready { state.ready = ready }
     }
 
     /// Slid to `x`, at once.
@@ -1800,5 +1877,39 @@ struct SlidePointed: ViewModifier {
             still.disablesAnimations = true
             withTransaction(still) { hovering = over }
         }
+    }
+}
+
+@MainActor
+final class NewSpaceSlideState: ObservableObject {
+    @Published var ready = false
+}
+
+/// The circular `+` cue centered in the revealed gutter while rubber-banding
+/// past the last space to open New Space.
+struct NewSpacePullCue: View {
+    static let side: CGFloat = 36
+    static let gap: CGFloat = 6
+
+    @ObservedObject var state: NewSpaceSlideState
+    @Environment(\.tone) private var tone
+
+    var body: some View {
+        Symbol("plus", size: 15, weight: state.ready ? .semibold : .medium)
+            .foregroundStyle(state.ready ? Palette.ink : Palette.muted(on: tone))
+            .frame(width: Self.side, height: Self.side)
+            .background(
+                Circle()
+                    .fill(state.ready ? Palette.wash(on: tone) : Palette.hover(on: tone))
+            )
+            .overlay {
+                if state.ready {
+                    Circle()
+                        .strokeBorder(Palette.ink.opacity(0.18), lineWidth: 1)
+                }
+            }
+            .scaleEffect(state.ready ? 1.0 : 0.88)
+            .animation(Motion.quick, value: state.ready)
+            .accessibilityLabel("New Space")
     }
 }

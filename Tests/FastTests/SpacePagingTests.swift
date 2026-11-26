@@ -129,4 +129,51 @@ struct SpacePagingTests {
         #expect(SpacePaging.ground(backdrop: .color, place: .docked) == .window)
         #expect(SpacePaging.ground(backdrop: .site, place: .docked) == .window)
     }
+
+    @Test func pullingPastTheLastSpaceRubberBandsWithMoreGive() {
+        // Past the last space with create enabled, pulling gives smoothly on a
+        // rubber band (more yielding than a dead end, never a full page).
+        let pulled = SpacePaging.offset(travel: -200, page: Self.page, back: true, forward: false, create: true)
+        let wall = SpacePaging.offset(travel: -200, page: Self.page, back: true, forward: false)
+        #expect(pulled < wall && pulled < -45 && pulled > -60)
+        #expect(SpacePaging.offset(travel: -100_000, page: Self.page, back: true, forward: false, create: true) > -Self.page)
+        // Before the first space with only one space still uses the tight wall give.
+        let before = SpacePaging.offset(travel: 200, page: Self.page, back: false, forward: false, create: true)
+        #expect(before > 12 && before < 16)
+    }
+
+    @Test func pullingPastTheLastSpaceTriggersNewSpaceOnlyPastThreshold() {
+        let threshold = SpacePaging.createThreshold(page: Self.page)
+        // Short pull or casual bump never triggers.
+        #expect(!SpacePaging.createReady(offset: -(threshold - 1), page: Self.page))
+        #expect(!SpacePaging.triggersCreate(offset: -20, speed: -2000, page: Self.page, create: true))
+        // Past the threshold, lifting still or moving forward triggers.
+        #expect(SpacePaging.createReady(offset: -threshold, page: Self.page))
+        #expect(SpacePaging.triggersCreate(offset: -threshold, speed: 0, page: Self.page, create: true))
+        #expect(SpacePaging.triggersCreate(offset: -(threshold + 10), speed: -200, page: Self.page, create: true))
+        // Pulling back toward the last space cancels even past the threshold.
+        #expect(!SpacePaging.triggersCreate(offset: -(threshold + 20), speed: 50, page: Self.page, create: true))
+        // Disabled create never triggers.
+        #expect(!SpacePaging.triggersCreate(offset: -(threshold + 20), speed: 0, page: Self.page, create: false))
+        // The row always springs back to the last space.
+        #expect(SpacePaging.landing(offset: -(threshold + 20), speed: 0, page: Self.page, back: true, forward: false) == 0)
+    }
+
+    @MainActor @Test func canSwipeNewSpaceTracksWindowAndSpacesSetting() {
+        let browser = Browser(windowID: UUID())
+        let oldSpaces = browser.prefs.usesSpaces
+        defer {
+            browser.prefs.usesSpaces = oldSpaces
+            browser.letGo()
+            if let id = browser.windowID {
+                try? FileManager.default.removeItem(at: Store.file("session-window-\(id.uuidString).json"))
+            }
+        }
+        browser.prefs.usesSpaces = false
+        #expect(!browser.canSwipeNewSpace)
+
+        browser.prefs.usesSpaces = true
+        #expect(browser.canSwipeNewSpace)
+        #expect(browser.swipesSpaces)
+    }
 }

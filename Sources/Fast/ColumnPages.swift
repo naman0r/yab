@@ -434,6 +434,9 @@ final class ColumnPages: NSView {
     private var slide: Slide?
     /// Mail's space as a page: its column, as it will stand.
     private var mailPage: NSView?
+    /// The pull-to-open `+` cue shown in the trailing gutter past the last space.
+    private var newSpaceView: NSView?
+    private var newSpaceState: NewSpaceSlideState?
 
     /// The row of spaces up: the live pages themselves, side by side, in a
     /// clip that one transform moves (SpacePager, as PagerStage with the
@@ -579,6 +582,40 @@ final class ColumnPages: NSView {
         return Look(tone: tone, scheme: tone.scheme, titleSize: look.titleSize, grain: look.grain)
     }
 
+    /// The pull-to-open `+` cue centered in the revealed gutter past the last space.
+    func updateNewSpace(pull: CGFloat, ready: Bool) {
+        guard let browser, slide != nil else { return }
+        guard pull > 0 else {
+            newSpaceView?.isHidden = true
+            if let state = newSpaceState, state.ready { state.ready = false }
+            return
+        }
+        let side = NewSpacePullCue.side
+        let lead = browser.inMail ? frame_.lead : ColumnLayout.lead(browser, pins: browser.pinCellCount)
+        let y = lead + (max(0, bounds.height - lead - frame_.footRoom) - side) / 2
+        let x = bounds.width + max(NewSpacePullCue.gap, (pull - side) / 2)
+        if newSpaceView == nil {
+            let state = NewSpaceSlideState()
+            let host = NSHostingView(rootView: AnyView(
+                NewSpacePullCue(state: state)
+                    .toned(look.tone)
+                    .environment(\.colorScheme, look.scheme)
+            ))
+            host.sizingOptions = []
+            host.safeAreaRegions = []
+            host.frame = CGRect(x: x, y: y, width: side, height: side)
+            addSubview(host, positioned: .below, relativeTo: nil)
+            host.layoutSubtreeIfNeeded()
+            newSpaceView = host
+            newSpaceState = state
+        }
+        guard let view = newSpaceView else { return }
+        view.isHidden = false
+        view.frame = CGRect(x: x, y: y, width: side, height: side)
+        view.alphaValue = min(1, pull / 32)
+        if let state = newSpaceState, state.ready != ready { state.ready = ready }
+    }
+
     /// Slid to `x`, at once: two fingers' move.
     func slideTo(_ x: CGFloat) {
         CATransaction.begin()
@@ -650,6 +687,9 @@ final class ColumnPages: NSView {
         layer?.sublayerTransform = CATransform3DIdentity
         layer?.masksToBounds = false
         mailPage?.isHidden = true
+        newSpaceView?.removeFromSuperview()
+        newSpaceView = nil
+        newSpaceState = nil
         for page in pages.values { page.headPins(hidden: false, offset: 0, from: nil, velocity: 0) }
         // The page landed on put at no offset in the same commit as the row
         // comes off: committed first, from a landing's completion with no

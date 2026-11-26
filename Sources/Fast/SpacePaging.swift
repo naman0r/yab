@@ -83,22 +83,48 @@ enum SpacePaging {
     static let still: Double = 5
     /// Moves older than this as the fingers lift say nothing of their speed.
     static let recent: TimeInterval = 0.06
+    /// Rubber-band give past the last space when pulling to open New Space,
+    /// and the column displacement (points) needed to arm and trigger it.
+    static let createGive: Double = 0.65
+    static let createPull: Double = 48
 
     /// What `past` points pushed beyond an end move, on a page `page` wide:
     /// nearly all of a small push's give, never a page.
-    static func rubber(_ past: Double, page: Double) -> Double {
+    static func rubber(_ past: Double, page: Double, give: Double = SpacePaging.give) -> Double {
         guard past > 0, page > 0 else { return 0 }
         return (1 - 1 / (past * give / page + 1)) * page
     }
 
+    /// How far past the last space the column must be pulled to open New Space.
+    static func createThreshold(page: Double) -> Double {
+        min(createPull, page * 0.25)
+    }
+
+    /// Whether a rubber-band pull past the last space has reached the trigger point.
+    static func createReady(offset: Double, page: Double) -> Bool {
+        guard page > 0 else { return false }
+        return -offset >= createThreshold(page: page)
+    }
+
+    /// Whether lifting the fingers after pulling past the last space opens New Space.
+    /// Pulling back toward the last space cancels even past the threshold.
+    static func triggersCreate(offset: Double, speed: Double, page: Double, create: Bool) -> Bool {
+        guard create, speed < still else { return false }
+        return createReady(offset: offset, page: page)
+    }
+
     /// Where the row stands for the fingers' travel, in points, negative
     /// toward the next space: the travel's half, as far as a whole page
-    /// where there is a space that way, and rubber past it.
-    static func offset(travel: Double, page: Double, back: Bool, forward: Bool) -> Double {
+    /// where there is a space that way, and rubber past it (more yielding
+    /// past the last space when pulling to open New Space).
+    static func offset(travel: Double, page: Double, back: Bool, forward: Bool, create: Bool = false) -> Double {
         let raw = travel * follow
         let low = forward ? -page : 0
         let high = back ? page : 0
-        if raw < low { return low - rubber(low - raw, page: page) }
+        if raw < low {
+            let edgeGive = (!forward && create) ? createGive : give
+            return low - rubber(low - raw, page: page, give: edgeGive)
+        }
         if raw > high { return high + rubber(raw - high, page: page) }
         return raw
     }
