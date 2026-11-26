@@ -456,8 +456,10 @@ final class ColumnPage: NSView {
         guard let browser, let look else { return nil }
         // A space not on screen lights the tab it was left on, as its page
         // beside the one on screen shows it (PagedSpace's `row.active`).
-        let live = space == browser.spaceID ? (browser.newTabLit ? nil : browser.activeID) : restingActive
-        return ColumnCell.Context(browser: browser, look: look, liveID: live, pointedID: pointedID)
+        let onScreen = space == browser.spaceID
+        let live = onScreen ? (browser.newTabLit ? nil : browser.activeID) : restingActive
+        return ColumnCell.Context(browser: browser, look: look, liveID: live, newTabLit: onScreen ? browser.newTabLit : restingActive == nil,
+                                  pointedID: pointedID)
     }
 
     /// The tab in front in this space's row as it was parked.
