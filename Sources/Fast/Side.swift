@@ -355,7 +355,7 @@ struct SideBar: View {
                                       frosted: plateFrosted)
                                 .transition(.identity)
                         } else {
-                            EmptyPlate(browser: browser, frosted: plateFrosted)
+                            EmptyPlate(browser: browser, near: near, frosted: plateFrosted)
                                 .transition(.identity)
                         }
                     }

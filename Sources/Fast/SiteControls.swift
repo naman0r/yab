@@ -1055,7 +1055,7 @@ struct SidePlate: View {
     @ObservedObject var browser: Browser
     @ObservedObject var tab: Tab
     @ObservedObject private var here = ExtensionsHere.shared
-    private var extensions: Extensions { space.map { Extensions.of(space: $0) } ?? Extensions.of(browser) }
+    private var extensions: Extensions? { Self.pins(in: browser, space: space, tab: tab, live: space == nil).extensions }
     /// A Chromium tab's own extensions (ChromiumColumn).
     @ObservedObject private var column = ChromiumColumn.shared
     @ObservedObject private var nativePopup = ChromiumPopupHost.shared
@@ -1108,21 +1108,78 @@ struct SidePlate: View {
         extensionPlate(in: browser, space: space, tab: tab).extensionHeight
     }
 
+    /// Where a plate's pinned extensions come from: one answer for the room
+    /// the column keeps for them (extensionPlate), a page's picture and the
+    /// live plate. Its tab's, or with none in front, those a new tab in its
+    /// space would run. Asking makes no store, builds no page and starts no
+    /// sign-in's extensions but the space on screen's.
+    @MainActor
+    enum Pins {
+        /// A WebKit page's sign-in's: nil while they aren't made, read from
+        /// their saved list.
+        case webKit(Extensions?, signIn: UUID?)
+        /// A Chromium tab's profile, or with none in front the space's: nil
+        /// while it isn't read.
+        case chromium(ChromiumExtensions?, tab: Tab?, privately: Bool)
+        /// A private page's or window's, with "Allow in private tabs" off.
+        case none
+
+        var ids: [String] {
+            switch self {
+            case .webKit(let made?, _): return made.buttons.filter(\.pinned).map(\.id)
+            case .webKit(nil, let signIn): return Self.saved(signIn).map(\.id)
+            case .chromium(_, let tab?, _): return ChromiumColumn.shared.pinnedIDs(for: tab)
+            case .chromium(let native?, nil, let privately): return ChromiumColumn.shared.pinnedIDs(native, privately: privately)
+            case .chromium(nil, nil, _), .none: return []
+            }
+        }
+
+        var buttons: [Extensions.Button] {
+            switch self {
+            case .webKit(let made?, _): return made.buttons.filter(\.pinned)
+            // Not started: by name from the list, in their room and order.
+            case .webKit(nil, let signIn):
+                return Self.saved(signIn).map {
+                    Extensions.Button(id: $0.id, name: $0.name, label: $0.name, icon: nil, badge: "", enabled: true, pinned: true, keys: nil)
+                }
+            case .chromium(_, let tab?, _): return ChromiumColumn.shared.buttons(for: tab)
+            case .chromium(let native?, nil, let privately): return ChromiumColumn.shared.buttons(native, privately: privately)
+            case .chromium(nil, nil, _), .none: return []
+            }
+        }
+
+        /// The sign-in's extensions to press, reorder and read dots from.
+        var extensions: Extensions? {
+            if case .webKit(let made, _) = self { return made }
+            return nil
+        }
+
+        private static func saved(_ signIn: UUID?) -> [Installed] {
+            (Extensions.unread(signIn) ?? []).filter { $0.enabled && $0.pinned == true }
+        }
+    }
+
+    /// `live`: the column's own plate, whose space's extensions run anyway.
+    static func pins(in browser: Browser, space: UUID?, tab: Tab?, live: Bool = false) -> Pins {
+        let id = space ?? browser.spaceID
+        if let tab, tab.engineKind == .chromium {
+            return .chromium(ChromiumColumn.shared.native(for: tab), tab: tab, privately: ChromiumColumn.isPrivate(tab))
+        }
+        let privately = tab.map(ChromiumColumn.isPrivate) ?? (browser.windowPurpose == .privateOnly)
+        if tab == nil, PageEngineFactory.standard.resolved(PageEngineFactory.requestedEngine ?? .webKit) == .chromium {
+            return .chromium(ChromiumColumn.shared.native(space: id, privately: privately), tab: nil, privately: privately)
+        }
+        guard !privately || browser.prefs.extensionsInPrivate else { return .none }
+        return .webKit(live ? Extensions.of(space: id) : Extensions.made(space: id), signIn: Extensions.signIn(of: id))
+    }
+
     static func extensionPlate(in browser: Browser, space: UUID?, tab: Tab?, shown: Bool = true) -> SpacePlateRouting.Plate {
         // A blank tab, or none, keeps the row as Arc does: dropped, every
         // pin under it went up a row, and a change of space to or from it
         // carried the plate and pins with the page.
         guard shown else { return .init(shown: shown) }
         // Measuring a parked space must not start its extensions.
-        let signIn = Extensions.signIn(of: space ?? browser.spaceID)
-        let ids: [String]
-        if let tab, tab.engineKind == .chromium {
-            ids = ChromiumColumn.shared.pinnedIDs(for: tab)
-        } else if let loaded = Extensions.all.first(where: { $0.signIn == signIn }) {
-            ids = loaded.buttons.filter(\.pinned).map(\.id)
-        } else {
-            ids = (Extensions.unread(signIn) ?? []).filter { $0.enabled && $0.pinned == true }.map(\.id)
-        }
+        let ids = pins(in: browser, space: space, tab: tab).ids
         let height = SideExtensionLayout(width: browser.prefs.sideWidth,
                                    count: ids.count,
                                    door: door, margin: SideBar.margin,
@@ -1133,7 +1190,7 @@ struct SidePlate: View {
     var body: some View {
         let facts = SiteFacts(tab: tab)
         let site = facts.site
-        let pinned = tab.engineKind == .chromium ? column.buttons(for: tab) : extensions.buttons.filter(\.pinned)
+        let pinned = Self.pins(in: browser, space: space, tab: tab, live: space == nil).buttons
         let layout = SideExtensionLayout(width: width, count: pinned.count, door: Self.door, margin: SideBar.margin,
                                          columns: SideBar.pinColumns(pinned.count, width: width), gap: SideBar.pinGap)
         // A pin's popup up keeps the plate as it is under the pointer: the
@@ -1175,7 +1232,7 @@ struct SidePlate: View {
         // A window kept back: "Window blocked" where the link stands (WindowChip).
         let chip = facts.isSite && !tab.windows.blocked.isEmpty
         let link = facts.isSite && up && !chip
-        let sliders = up || extensions.dotted || live != nil
+        let sliders = up || extensions?.dotted == true || live != nil
         let doors = (blocker ? 1 : 0) + shownPins.count + (link ? 1 : 0) + (sliders ? 1 : 0)
         // What the doors cover of the site's end, the site fading out under it.
         let cover = chip ? WindowChip.cover(after: (blocker ? 1 : 0) + shownPins.count)
@@ -1203,7 +1260,7 @@ struct SidePlate: View {
                     }
                     ForEach(shownPins) { button in
                         PlatePin(button: button, lit: popped && !fromDoor && popupID == button.id,
-                                 native: tab.engineKind == .chromium ? tab : nil) {
+                                 native: tab.engineKind == .chromium ? tab : nil, anchored: space == nil, usable: usable) {
                             press(button.id)
                         }
                         .transition(.opacity)
@@ -1252,14 +1309,17 @@ struct SidePlate: View {
             plate
             if layout.separate {
                 PinnedRow(layout: layout, pinned: pinned, extensions: extensions, lit: popped && !fromDoor ? popupID : nil,
-                          native: tab.engineKind == .chromium ? tab : nil, press: press)
+                          native: tab.engineKind == .chromium ? tab : nil, anchored: space == nil, usable: { _ in usable }, press: press)
             }
         }
     }
 
     private func press(_ id: String) {
-        if tab.engineKind == .chromium { column.press(id, tab: tab) } else { extensions.press(id) }
+        if tab.engineKind == .chromium { column.press(id, tab: tab) } else { extensions?.press(id) }
     }
+
+    /// A Chromium action acts on its page: none until the page is built.
+    private var usable: Bool { tab.engineKind != .chromium || tab.builtPage is ChromiumPage }
 
     /// The site, ⌘L when pressed. A copy leaves it where it is: the tick
     /// says one from the link, the corner one from the key. Its address
@@ -1315,7 +1375,7 @@ struct SidePlate: View {
 
 /// The plate on a space's page as it slides in (PagedSpace), as the live
 /// column draws it: its extension row with the pointer outside too, only
-/// the address's inline doors depending on the pointer.
+/// the pins that fit in the plate depending on the pointer.
 struct PagedPlate: View {
     let browser: Browser
     let tab: Tab?
@@ -1324,49 +1384,69 @@ struct PagedPlate: View {
     @Environment(\.slidePointer) private var pointer
 
     var body: some View {
-        if let tab {
-            if let pointer {
-                Pointed(browser: browser, tab: tab, width: width, space: space, pointer: pointer)
-            } else {
-                SidePlate(browser: browser, tab: tab, near: false, width: width, space: space)
-            }
+        if let pointer {
+            Pointed(browser: browser, tab: tab, width: width, space: space, pointer: pointer)
         } else {
-            EmptyPlate(browser: browser, space: space)
+            Self.plate(browser: browser, tab: tab, width: width, space: space, near: false)
+        }
+    }
+
+    @ViewBuilder
+    fileprivate static func plate(browser: Browser, tab: Tab?, width: CGFloat, space: UUID?, near: Bool) -> some View {
+        if let tab {
+            SidePlate(browser: browser, tab: tab, near: near, width: width, space: space)
+        } else {
+            EmptyPlate(browser: browser, space: space, near: near)
         }
     }
 
     private struct Pointed: View {
         let browser: Browser
-        let tab: Tab
+        let tab: Tab?
         let width: CGFloat
         let space: UUID?
         @ObservedObject var pointer: SlidePointer
 
         var body: some View {
-            SidePlate(browser: browser, tab: tab, near: pointer.near, width: width, space: space)
+            PagedPlate.plate(browser: browser, tab: tab, width: width, space: space, near: pointer.near)
         }
     }
 }
 
 /// The column's plate with no tab in front: where the address would be,
-/// asking where to go, ⌘T's field when pressed, and the pinned extensions'
-/// row under it, as with a tab. The pins and rows under it stay where they
-/// were.
+/// asking where to go, ⌘T's field when pressed, and the pinned extensions
+/// as with a tab, in the plate with the pointer in the column when they
+/// fit, else in a row of their own under it. The pins and rows under it
+/// stay where they were.
 struct EmptyPlate: View {
     @ObservedObject var browser: Browser
     var space: UUID? = nil
+    /// The pointer is in the column (SidePlate's `near`).
+    var near = false
     var frosted = false
     @ObservedObject private var here = ExtensionsHere.shared
+    @ObservedObject private var column = ChromiumColumn.shared
+    @ObservedObject private var hung = ExtensionWindowFrame.Hung.shared
     @Environment(\.tone) private var tone
     @State private var hovering = false
 
     var body: some View {
-        let extensions = space.map { Extensions.of(space: $0) } ?? Extensions.of(browser)
-        let pinned = extensions.buttons.filter(\.pinned)
+        // A page's picture never starts its space's extensions.
+        let live = space == nil
+        let pins = SidePlate.pins(in: browser, space: space, tab: nil, live: live)
+        let pinned = pins.buttons
+        let extensions = pins.extensions
         let width = browser.prefs.sideWidth
         let layout = SideExtensionLayout(width: width, count: pinned.count, door: SidePlate.door, margin: SideBar.margin,
                                          columns: SideBar.pinColumns(pinned.count, width: width), gap: SideBar.pinGap)
         let popup = ExtensionPopup.shared
+        let lit = popup.isShown && !popup.fromDoor ? popup.extensionID : nil
+        // As SidePlate's: a popup or a window of its own keeps them in.
+        let near = near || pinned.contains { $0.id == lit || hung.ids.contains($0.id) }
+        let shownPins = near && !layout.separate ? pinned : []
+        // With no page, only what needs none: a popup or a side panel. A
+        // Chromium action acts on its page, so none.
+        let usable = { (id: String) in extensions?.standsAlone(id) ?? false }
         VStack(spacing: 0) {
             Button { browser.newTab() } label: {
                 Text("Search or type a URL")
@@ -1380,13 +1460,26 @@ struct EmptyPlate: View {
             .buttonStyle(.plain)
             .focusable(false)
             .frame(height: SidePlate.height)
+            .overlay(alignment: .trailing) {
+                HStack(spacing: 2) {
+                    ForEach(shownPins) { button in
+                        PlatePin(button: button, lit: lit == button.id, anchored: live, usable: usable(button.id)) {
+                            extensions?.press(button.id)
+                        }
+                        .transition(.opacity)
+                    }
+                }
+                .padding(.trailing, SidePlate.air)
+            }
             .overlay(PlateGlass(shown: true))
             .background(PlateGround(hovering: hovering, frosted: frosted))
             .contentShape(RoundedRectangle(cornerRadius: SidePlate.corner, style: .continuous))
             .onHover { hovering = $0 }
+            .animation(Motion.quick, value: near)
             if layout.separate {
-                PinnedRow(layout: layout, pinned: pinned, extensions: extensions,
-                          lit: popup.isShown && !popup.fromDoor ? popup.extensionID : nil) { extensions.press($0) }
+                PinnedRow(layout: layout, pinned: pinned, extensions: extensions, lit: lit, anchored: live, usable: usable) {
+                    extensions?.press($0)
+                }
             }
         }
     }
@@ -1397,20 +1490,29 @@ struct EmptyPlate: View {
 private struct PinnedRow: View {
     let layout: SideExtensionLayout
     let pinned: [Extensions.Button]
-    let extensions: Extensions
+    /// To reorder them by dragging: a WebKit sign-in's, once made.
+    let extensions: Extensions?
     /// The one whose popup hangs from it.
     let lit: String?
     var native: Tab? = nil
+    /// Popups hang from them: the live plate's, not a page's picture.
+    var anchored = true
+    var usable: (String) -> Bool = { _ in true }
     let press: (String) -> Void
 
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.fixed(layout.cell), spacing: layout.gap), count: layout.columns),
                   spacing: layout.gap) {
             ForEach(pinned) { button in
-                PlatePin(button: button, lit: lit == button.id, width: layout.cell, plated: true, native: native) {
+                let pin = PlatePin(button: button, lit: lit == button.id, width: layout.cell, plated: true, native: native,
+                                   anchored: anchored, usable: usable(button.id)) {
                     press(button.id)
                 }
-                .modifier(PinnedOrder(button: button, extensions: extensions))
+                if let extensions {
+                    pin.modifier(PinnedOrder(button: button, extensions: extensions))
+                } else {
+                    pin
+                }
             }
         }
         .padding(.top, layout.gap)
@@ -1480,6 +1582,12 @@ struct PlatePin: View {
     var plated = false
     /// A Chromium tab's native extension: its own right-click lines.
     var native: Tab? = nil
+    /// Its popup hangs from it: off for a page's picture, whose pins are
+    /// only looked at.
+    var anchored = true
+    /// Pressing it does something here: off for an action on a page with
+    /// no page to act on.
+    var usable = true
     let act: () -> Void
     @Environment(\.tone) private var tone
     @State private var hovering = false
@@ -1498,6 +1606,7 @@ struct PlatePin: View {
         }
         .buttonStyle(Door.Give())
         .focusable(false)
+        .disabled(!usable)
         .onHover {
             hovering = $0
             // Its menu's own rows, read before a right click asks for them.
@@ -1510,8 +1619,8 @@ struct PlatePin: View {
             else { ExtensionActions(id: button.id, name: button.name, extensions: Extensions.here) }
         }
         .background {
-            if let native { ChromiumPopupAnchor(id: button.id, tab: native) }
-            else { ExtensionAnchor(id: button.id) }
+            if anchored, let native { ChromiumPopupAnchor(id: button.id, tab: native) }
+            else if anchored { ExtensionAnchor(id: button.id) }
         }
     }
 }
