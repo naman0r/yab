@@ -178,4 +178,85 @@ struct SpaceSwitchStillTopTests {
         #expect(try await anchors(EmptyPlate(browser: browser, near: true)) == 1)
         #expect(try await anchors(EmptyPlate(browser: browser, space: browser.spaceID, near: true)) == 0)
     }
+
+    /// The shared pins over the row while it slides: still where they stand,
+    /// and from the switch on lit as the space on screen lights them (on
+    /// main the space left's pin stayed lit until the row landed). Pins
+    /// that aren't every space's go with their page. An empty space's page
+    /// beside it lights New tab as it will rest.
+    @Test func heldPinsStayPutAndTakeTheNewSpacesLight() throws {
+        _ = NSApplication.shared
+        let world = World()
+        defer { world.close() }
+        let browser = world.browser
+        browser.prefs.sideWidth = 240
+        let work = try world.space("Work", own: false)
+        world.share(0)
+        let pin = world.site("https://pin.example.test/"), site = world.site()
+        browser.lay([pin, site])
+        browser.pin(pin)
+        browser.select(pin)
+
+        let room = CGRect(x: 0, y: 0, width: 240, height: 500)
+        let root = NSView(frame: room)
+        let window = NSWindow(contentRect: room, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+        let pages = ColumnPages(browser: browser)
+        pages.frame = room
+        root.addSubview(pages)
+        defer { pages.stop() }
+        pages.given(ColumnPages.Frame(lead: 44, footRoom: 0, top: 36, foot: false),
+                    look: ColumnPages.Look(tone: nil, scheme: .light, titleSize: 13, grain: 0))
+        pages.layoutSubtreeIfNeeded()
+        pages.layout()
+        let home = try #require(pages.shown)
+        func cell(in view: NSView) -> ColumnCell? {
+            if let cell = view as? ColumnCell, cell.current?.tab == ObjectIdentifier(pin) { return cell }
+            return view.subviews.lazy.compactMap { cell(in: $0) }.first
+        }
+        let square = try #require(cell(in: home))
+        let pagesLayer = try #require(pages.layer)
+        // Where it is drawn across: its frame in the column, and every
+        // transform over it, the row's and the held pins'.
+        func drawn() -> CGFloat {
+            var x = square.convert(square.bounds, to: pages).minX + pagesLayer.sublayerTransform.m41
+            var view: NSView? = square
+            while let each = view, each !== pages {
+                x += each.layer?.transform.m41 ?? 0
+                view = each.superview
+                if let above = view, above !== pages { x += above.layer?.sublayerTransform.m41 ?? 0 }
+            }
+            return x
+        }
+        let rest = drawn()
+        #expect(square.current?.live == true)
+
+        let order = browser.turnOrder.map(\.id)
+        let from = try #require(order.firstIndex(of: browser.spaceID)), to = try #require(order.firstIndex(of: work.id))
+        #expect(pages.beginSlide(order: order, home: from))
+        _ = pages.build(to, row: browser.loadRow(work.id), travelling: [])
+        // Work, with no tab in front, comes in with New tab lit as it will
+        // rest: on main it lit only once the row had landed.
+        func newTab(in view: NSView) -> ColumnCell? {
+            if let cell = view as? ColumnCell, cell.itemID == "new-tab" { return cell }
+            return view.subviews.lazy.compactMap { newTab(in: $0) }.first
+        }
+        let coming = try #require(pages.subviews.compactMap { $0 as? ColumnPage }.first { $0 !== home })
+        #expect(newTab(in: coming)?.current?.lit == true)
+        pages.holdPins(true)
+        pages.slideTo(-100)
+        #expect(abs(drawn() - rest) < 0.5)
+
+        browser.switchSpace(to: work.id)
+        pages.sync()
+        #expect(abs(drawn() - rest) < 0.5)
+        // Work has no tab in front: its New tab is lit, not the pin.
+        #expect(square.current?.live == false)
+
+        pages.holdPins(false)
+        #expect(abs(drawn() - (rest - 100)) < 0.5)
+        pages.endSlide()
+    }
 }
