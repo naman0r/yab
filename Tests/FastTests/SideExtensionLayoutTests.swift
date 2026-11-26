@@ -5,8 +5,8 @@ import Testing
 @MainActor
 struct SideExtensionLayoutTests {
     private func layout(width: CGFloat, count: Int, door: CGFloat) -> SideExtensionLayout {
-        SideExtensionLayout(width: width, count: count, door: door, margin: SideBar.margin,
-                            columns: SideBar.extensionColumns(count, width: width), gap: SideBar.pinGap)
+        // As SiteControls has it, for the room it keeps and the grid it draws.
+        SideExtensionLayout(sidebar: width, count: count, door: door)
     }
 
     @Test func emptyAndSinglePinKeepAddressHeight() {
@@ -62,6 +62,20 @@ struct SideExtensionLayoutTests {
         for count in [5, 6] {
             #expect(SideBar.extensionColumns(count, width: wide) == count)
             #expect(SideBar.extensionColumns(count, width: narrow) == 3)
+        }
+    }
+
+    /// The room kept for six over the pins, at the width where pins first
+    /// go four across and a point narrower, in both densities: one row of
+    /// six, then two of three.
+    @Test func theRoomKeptIsTheRowsDrawn() throws {
+        let widths = Array(stride(from: Metrics.sideMin, through: Metrics.sideMax, by: 1))
+        let four = try #require(widths.first { SideBar.pinColumns(12, width: $0) == 4 })
+        for door: CGFloat in [26, 28] {
+            let one = layout(width: four, count: 6, door: door), two = layout(width: four - 1, count: 6, door: door)
+            try #require(one.separate && two.separate)
+            #expect(one.columns == 6 && one.height == door + one.gap)
+            #expect(two.columns == 3 && two.height == 2 * (door + two.gap))
         }
     }
 
