@@ -427,10 +427,23 @@ final class SpaceTray: NSView {
         // The look card's controls, as tall as they lay out: a second color
         // brings Shift with tabs, drawings their strength (refitLook).
         case .color: return Self.head + Self.strip + 10 + lookHeight + i + Self.foot
-        case .signIns:
-            let rows = CGFloat(2 + browser.signInPeers.count)
-            return Self.head + Self.strip + 10 + rows * Self.row + (rows - 1) * 8 + i + Self.foot
+        case .signIns: return Self.signInsHeight(peers: browser.signInPeers.count, ceiling: ceiling)
         }
+    }
+
+    /// The Sign-ins step with `peers` spaces' sign-ins offered beside the
+    /// shared ones and its own: as tall as its choices, or, past what the
+    /// window has room for, `ceiling`, the choices scrolling inside it as
+    /// the list of spaces does.
+    static func signInsHeight(peers: Int, ceiling: CGFloat) -> CGFloat {
+        let rows = CGFloat(2 + peers)
+        return min(head + strip + 10 + rows * row + (rows - 1) * 8 + CardFrame.inset + foot, ceiling)
+    }
+    /// How tall its choices may stand, and whether they all fit.
+    var signInChoices: (height: CGFloat, fit: Bool) {
+        let rows = CGFloat(2 + browser.signInPeers.count)
+        let room = height(.signIns) - Self.head - Self.strip - 10 - CardFrame.inset - Self.foot
+        return (room, room >= rows * Self.row + (rows - 1) * 8)
     }
 
     private var inner: CGFloat { width - 2 * CardFrame.inset }
@@ -1164,15 +1177,26 @@ final class SpaceTray: NSView {
         // The window already wears its look: worn under the preview, which
         // then goes, with nothing to cross.
         if !draft.colors.isEmpty { browser.prefs.backdrop = .color }
+        guard draft.folder != nil || draft.peer != nil else {
+            browser.addSpace(named: draft.named, icon: draft.icon, ownSignIns: draft.own, paint: draft.paint, taking: taking, washed: washed)
+            if washed { browser.spaceWash.hide() }
+            return
+        }
+        // Made, on the sign-ins it joins, before anything goes there: a tab
+        // already on them goes as it is, never closed and opened again
+        // (moveTabs); then the folder whole, or the tabs, and it is shown.
+        let made = browser.addSpace(named: draft.named, icon: draft.icon, ownSignIns: draft.own, paint: draft.paint, show: false)
+        if let peer = draft.peer { browser.setSpaceProfile(made, with: peer) }
+        let front = browser.active
+        var moved: SpaceMove?
         if let folder = draft.folder {
-            // Made, the folder sent there whole, then shown.
-            let made = browser.addSpace(named: draft.named, icon: draft.icon, ownSignIns: draft.own, paint: draft.paint, show: false)
-            if let peer = draft.peer { browser.setSpaceProfile(made, with: peer) }
             browser.moveFolder(folder, to: made, say: false, ask: false, hand: true)
-            browser.switchSpace(to: made, washed: washed)
-        } else {
-            let made = browser.addSpace(named: draft.named, icon: draft.icon, ownSignIns: draft.own, paint: draft.paint, taking: taking, washed: washed)
-            if let peer = draft.peer { browser.setSpaceProfile(made, with: peer) }
+        } else if !taking.isEmpty {
+            moved = browser.moveTabs(taking, to: made, say: false, step: false)
+        }
+        browser.switchSpace(to: made, washed: washed)
+        if let arrived = moved?.tabs.first(where: { $0.original == front?.id })?.now, browser.tabs.contains(where: { $0 === arrived }) {
+            browser.select(arrived)
         }
         if washed { browser.spaceWash.hide() }
     }
@@ -2005,22 +2029,42 @@ struct TrayStep: View {
     // MARK: sign-ins
 
     private var signIns: some View {
-        VStack(spacing: 8) {
+        let choices = tray?.signInChoices ?? (height: 0, fit: true)
+        return VStack(spacing: 8) {
             strip.padding(.bottom, 2)
-            check("Shared Sign-ins", "Signed in wherever your other spaces are.", on: !draft.own && draft.peer == nil) {
-                draft.own = false
-                draft.peer = nil
-            }
-            ForEach(tray?.browserForList.signInPeers ?? []) { space in
-                check("Same as \(space.name)", "Signed in wherever \(space.name) is.", on: draft.peer == space.id) {
-                    draft.own = false
-                    draft.peer = space.id
+            if choices.fit {
+                signInChoices
+            } else {
+                ThreadScrollView(.vertical) {
+                    VStack(spacing: 8) { signInChoices }
                 }
+                // Faded where there are more, as the list of spaces is.
+                .modifier(ScrollEdges(more: $more, scrolled: { _ in }))
+                .overlay(alignment: .top) { haze(.top).opacity(more.above ? 1 : 0) }
+                .overlay(alignment: .bottom) { haze(.bottom).opacity(more.below ? 1 : 0) }
+                .animation(Motion.quick, value: more.above)
+                .animation(Motion.quick, value: more.below)
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollIndicators(.never)
+                .frame(height: choices.height)
             }
-            check("Its Own Sign-ins", "Starts signed out, with cookies of its own.", on: draft.own) {
-                draft.own = true
-                draft.peer = nil
+        }
+    }
+
+    @ViewBuilder private var signInChoices: some View {
+        check("Shared Sign-ins", "Signed in wherever your other spaces are.", on: !draft.own && draft.peer == nil) {
+            draft.own = false
+            draft.peer = nil
+        }
+        ForEach(tray?.browserForList.signInPeers ?? []) { space in
+            check("Same as \(space.name)", "Signed in wherever \(space.name) is.", on: draft.peer == space.id) {
+                draft.own = false
+                draft.peer = space.id
             }
+        }
+        check("Its Own Sign-ins", "Starts signed out, with cookies of its own.", on: draft.own) {
+            draft.own = true
+            draft.peer = nil
         }
     }
 

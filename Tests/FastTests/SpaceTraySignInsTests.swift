@@ -61,4 +61,34 @@ struct SpaceTraySignInsTests {
             #expect(errands.profileID == Space.firstID)
         }
     }
+
+    @Test func aTabTakenOntoItsOwnSignInsGoesAsItIs() throws {
+        try world([personal, work]) { browser in
+            browser.switchSpace(to: work.id)
+            let tab = Tab()
+            tab.restore(url: URL(string: "https://work.test/draft")!, title: "Draft")
+            browser.prepare(tab)
+            browser.lay([tab])
+            browser.activeID = tab.id
+            let draft = SpaceDraft(prefs: browser.prefs, tab: tab)
+            draft.name = "Projects"
+            draft.taking = true
+            draft.peer = work.id
+            SpaceTray.make(draft, in: browser, taking: [tab], washed: false)
+            let made = try #require(browser.spaces.first { $0.name == "Projects" })
+            #expect(made.profileID == work.id)
+            #expect(browser.spaceID == made.id)
+            // The same tab, live, not closed and opened again from disk.
+            #expect(browser.tabs.contains { $0 === tab })
+            #expect(browser.activeID == tab.id)
+        }
+    }
+
+    @Test func manySignInsScrollInsideTheWindowAndOneIsAsItWas() {
+        let today = 48 + 36 + 10 + 2 * 60 + 8 + CardFrame.inset + SpaceTray.foot
+        #expect(SpaceTray.signInsHeight(peers: 0, ceiling: 10_000) == today)
+        #expect(SpaceTray.signInsHeight(peers: 1, ceiling: 10_000) == today + 68)
+        // Eight in a window with room for 590: no taller than that.
+        #expect(SpaceTray.signInsHeight(peers: 8, ceiling: 590) == 590)
+    }
 }
