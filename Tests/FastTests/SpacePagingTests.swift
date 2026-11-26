@@ -130,33 +130,46 @@ struct SpacePagingTests {
         #expect(SpacePaging.ground(backdrop: .site, place: .docked) == .window)
     }
 
-    @Test func pullingPastTheLastSpaceRubberBandsWithMoreGive() {
-        // Past the last space with create enabled, pulling gives smoothly on a
-        // rubber band (more yielding than a dead end, never a full page).
-        let pulled = SpacePaging.offset(travel: -200, page: Self.page, back: true, forward: false, create: true)
-        let wall = SpacePaging.offset(travel: -200, page: Self.page, back: true, forward: false)
-        #expect(pulled < wall && pulled < -45 && pulled > -60)
-        #expect(SpacePaging.offset(travel: -100_000, page: Self.page, back: true, forward: false, create: true) > -Self.page)
-        // Before the first space with only one space still uses the tight wall give.
-        let before = SpacePaging.offset(travel: 200, page: Self.page, back: false, forward: false, create: true)
-        #expect(before > 12 && before < 16)
+    @Test func thePlusPastTheLastSpaceFillsWithTheRowsGive() {
+        // Arc's: in at 15 points of give, its ring full at 22.5.
+        #expect(SpacePaging.plus(0) == (0, 0))
+        #expect(SpacePaging.plus(7.5) == (0.5, 1.0 / 3))
+        #expect(SpacePaging.plus(15) == (1, 15 / 22.5))
+        #expect(SpacePaging.plus(22.5) == (1, 1))
+        #expect(SpacePaging.plus(80) == (1, 1))
+        // On the row's own rubber band, not a looser one: full takes about
+        // 330 points of fingers on a 226 point column, as in Arc, and 200,
+        // Arc's measured 14 points, is short of it.
+        let short = -SpacePaging.offset(travel: -200, page: Self.page, back: true, forward: false)
+        #expect(SpacePaging.plus(short).ring < 1)
+        let full = -SpacePaging.offset(travel: -340, page: Self.page, back: true, forward: false)
+        #expect(SpacePaging.plus(full).ring == 1)
+        #expect(SpacePaging.plus(-SpacePaging.offset(travel: -320, page: Self.page, back: true, forward: false)).ring < 1)
     }
 
-    @Test func pullingPastTheLastSpaceTriggersNewSpaceOnlyPastThreshold() {
-        let threshold = SpacePaging.createThreshold(page: Self.page)
-        // Short pull or casual bump never triggers.
-        #expect(!SpacePaging.createReady(offset: -(threshold - 1), page: Self.page))
-        #expect(!SpacePaging.triggersCreate(offset: -20, speed: -2000, page: Self.page, create: true))
-        // Past the threshold, lifting still or moving forward triggers.
-        #expect(SpacePaging.createReady(offset: -threshold, page: Self.page))
-        #expect(SpacePaging.triggersCreate(offset: -threshold, speed: 0, page: Self.page, create: true))
-        #expect(SpacePaging.triggersCreate(offset: -(threshold + 10), speed: -200, page: Self.page, create: true))
-        // Pulling back toward the last space cancels even past the threshold.
-        #expect(!SpacePaging.triggersCreate(offset: -(threshold + 20), speed: 50, page: Self.page, create: true))
-        // Disabled create never triggers.
-        #expect(!SpacePaging.triggersCreate(offset: -(threshold + 20), speed: 0, page: Self.page, create: false))
-        // The row always springs back to the last space.
-        #expect(SpacePaging.landing(offset: -(threshold + 20), speed: 0, page: Self.page, back: true, forward: false) == 0)
+    @Test func onlyARingHeldFullMakesASpace() {
+        // Short of full: nothing, however long it is held.
+        var since = SpacePaging.fullSince(nil, past: 22, at: 0)
+        #expect(since == nil)
+        #expect(!SpacePaging.makesSpace(fullSince: since, liftedAt: 5))
+        // Full at 1.0, still full after: the first time is kept.
+        since = SpacePaging.fullSince(since, past: 23, at: 1.0)
+        since = SpacePaging.fullSince(since, past: 30, at: 1.05)
+        #expect(since == 1.0)
+        // Lifted the moment it filled: no space; after a tenth: New Space.
+        #expect(!SpacePaging.makesSpace(fullSince: since, liftedAt: 1.08))
+        #expect(SpacePaging.makesSpace(fullSince: since, liftedAt: 1.11))
+        // Pulled back short of full cancels, and pulling on again starts
+        // the tenth over.
+        since = SpacePaging.fullSince(since, past: 20, at: 1.2)
+        #expect(since == nil)
+        #expect(!SpacePaging.makesSpace(fullSince: since, liftedAt: 1.5))
+        since = SpacePaging.fullSince(since, past: 25, at: 1.3)
+        #expect(since == 1.3)
+        #expect(!SpacePaging.makesSpace(fullSince: since, liftedAt: 1.35))
+        // The row still goes back to the last space, as it always did.
+        #expect(SpacePaging.landing(offset: -30, speed: 0, page: Self.page, back: true, forward: false) == 0)
+        #expect(SpacePaging.landing(offset: -30, speed: -400, page: Self.page, back: true, forward: false) == 0)
     }
 
     @MainActor @Test func canSwipeNewSpaceTracksWindowAndSpacesSetting() {

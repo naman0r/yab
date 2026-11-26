@@ -1936,6 +1936,8 @@ struct SpaceSwipe: NSViewRepresentable {
         /// halfway sends them. The column's row lets itself go
         /// (SpacePager.lost).
         private func lose() {
+            // A "+" brought out unpaged whose end went to another window.
+            if unpaged { MainActor.assumeIsolated { NewSpacePlus.shared.drop() } }
             guard owned, sideways == true, !paging, !unpaged, !column else { return }
             MainActor.assumeIsolated { SpacePull.shared.cancel() }
         }
@@ -2060,8 +2062,8 @@ struct SpaceSwipe: NSViewRepresentable {
                     if mine, paging {
                         paging = false
                         let speed = SpacePaging.speed(recent.map { ($0.0, Double($0.1)) }, liftedAt: event.timestamp)
-                        let allowCreate = event.phase == .ended
-                        MainActor.assumeIsolated { SpacePager.shared.release(speed: CGFloat(speed), allowCreate: allowCreate) }
+                        let lifted = event.phase == .ended ? event.timestamp : nil
+                        MainActor.assumeIsolated { SpacePager.shared.release(speed: CGFloat(speed), liftedAt: lifted) }
                         return nil
                     }
                     // Gone quiet before lifting is no flick.
@@ -2071,19 +2073,15 @@ struct SpaceSwipe: NSViewRepresentable {
                         let flick = flicked()
                         let travelled = travel
                         let way = travel < 0 ? 1 : -1
-                        let allowCreate = event.phase == .ended
+                        let lifted = event.phase == .ended ? event.timestamp : nil
                         MainActor.assumeIsolated {
+                            NewSpacePlus.shared.lift(at: lifted, browser: browser)
                             let far = abs(travelled) / SpacePull.reach
                             guard far >= SpacePull.enough || (flick && far >= SpacePull.flickEnough) else { return }
                             let order = browser.turnOrder
                             // One space, never round past the ends, as the row goes.
-                            if let here = order.firstIndex(where: { $0.id == browser.spaceID }) {
-                                if order.indices.contains(here + way) {
-                                    browser.switchSpace(to: order[here + way].id)
-                                } else if allowCreate, way == 1, here == order.count - 1,
-                                          browser.canSwipeNewSpace, far >= SpacePull.enough {
-                                    SpaceTray.open(browser)
-                                }
+                            if let here = order.firstIndex(where: { $0.id == browser.spaceID }), order.indices.contains(here + way) {
+                                browser.switchSpace(to: order[here + way].id)
                             }
                         }
                         return nil
@@ -2115,10 +2113,18 @@ struct SpaceSwipe: NSViewRepresentable {
                 MainActor.assumeIsolated { SpaceSwipe.note("grab \(paging) \(SpacePager.refusal(browser) ?? "")") }
             }
             if paging {
-                MainActor.assumeIsolated { SpacePager.shared.follow(travelled) }
+                let time = event.timestamp
+                MainActor.assumeIsolated { SpacePager.shared.follow(travelled, at: time) }
                 return nil
             }
-            if unpaged { return nil }
+            if unpaged {
+                // With Reduce Motion the row stands still, but the "+" past
+                // the last space comes all the same, as far as the row
+                // would have given.
+                let time = event.timestamp
+                MainActor.assumeIsolated { NewSpacePlus.shared.pull(unpaged: travelled, at: time, browser: browser) }
+                return nil
+            }
             MainActor.assumeIsolated {
                 // All the way, it holds there: the space comes when the
                 // fingers lift, as a page's swipe back does, never while

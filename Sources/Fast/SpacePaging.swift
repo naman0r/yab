@@ -83,48 +83,49 @@ enum SpacePaging {
     static let still: Double = 5
     /// Moves older than this as the fingers lift say nothing of their speed.
     static let recent: TimeInterval = 0.06
-    /// Rubber-band give past the last space when pulling to open New Space,
-    /// and the column displacement (points) needed to arm and trigger it.
-    static let createGive: Double = 0.65
-    static let createPull: Double = 48
+    /// Past the last space Arc brings a "+" in at the column's edge, driven
+    /// by how far the row has given there: all the way in at 15 points, its
+    /// ring full at 22.5, and a new space only for fingers lifted after it
+    /// has been full more than a tenth of a second (Arc 1.173.1's
+    /// EdgeFeedbackView, as github.com/VictorKildahl/cra/pull/564 read it).
+    static let plusIn: Double = 15
+    static let plusFull: Double = 22.5
+    static let plusHeld: TimeInterval = 0.1
+
+    /// How far in the "+" is and how full its ring, 0 to 1, for the row
+    /// `past` points beyond the last space.
+    static func plus(_ past: Double) -> (shown: Double, ring: Double) {
+        (min(1, max(0, past / plusIn)), min(1, max(0, past / plusFull)))
+    }
+
+    /// Since when the ring has been full, the row now `past` points beyond
+    /// the last space at `time`: kept while it stays full, nil once it
+    /// isn't, so pulling back short of it and on again starts over.
+    static func fullSince(_ was: TimeInterval?, past: Double, at time: TimeInterval) -> TimeInterval? {
+        plus(past).ring >= 1 ? was ?? time : nil
+    }
+
+    /// Whether fingers lifted at `liftedAt` make a new space, the ring
+    /// full since `fullSince` (nil: not full).
+    static func makesSpace(fullSince: TimeInterval?, liftedAt: TimeInterval) -> Bool {
+        fullSince.map { liftedAt - $0 > plusHeld } ?? false
+    }
 
     /// What `past` points pushed beyond an end move, on a page `page` wide:
     /// nearly all of a small push's give, never a page.
-    static func rubber(_ past: Double, page: Double, give: Double = SpacePaging.give) -> Double {
+    static func rubber(_ past: Double, page: Double) -> Double {
         guard past > 0, page > 0 else { return 0 }
         return (1 - 1 / (past * give / page + 1)) * page
     }
 
-    /// How far past the last space the column must be pulled to open New Space.
-    static func createThreshold(page: Double) -> Double {
-        min(createPull, page * 0.25)
-    }
-
-    /// Whether a rubber-band pull past the last space has reached the trigger point.
-    static func createReady(offset: Double, page: Double) -> Bool {
-        guard page > 0 else { return false }
-        return -offset >= createThreshold(page: page)
-    }
-
-    /// Whether lifting the fingers after pulling past the last space opens New Space.
-    /// Pulling back toward the last space cancels even past the threshold.
-    static func triggersCreate(offset: Double, speed: Double, page: Double, create: Bool) -> Bool {
-        guard create, speed < still else { return false }
-        return createReady(offset: offset, page: page)
-    }
-
     /// Where the row stands for the fingers' travel, in points, negative
     /// toward the next space: the travel's half, as far as a whole page
-    /// where there is a space that way, and rubber past it (more yielding
-    /// past the last space when pulling to open New Space).
-    static func offset(travel: Double, page: Double, back: Bool, forward: Bool, create: Bool = false) -> Double {
+    /// where there is a space that way, and rubber past it.
+    static func offset(travel: Double, page: Double, back: Bool, forward: Bool) -> Double {
         let raw = travel * follow
         let low = forward ? -page : 0
         let high = back ? page : 0
-        if raw < low {
-            let edgeGive = (!forward && create) ? createGive : give
-            return low - rubber(low - raw, page: page, give: edgeGive)
-        }
+        if raw < low { return low - rubber(low - raw, page: page) }
         if raw > high { return high + rubber(raw - high, page: page) }
         return raw
     }
