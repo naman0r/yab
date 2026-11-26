@@ -362,7 +362,11 @@ struct SideBar: View {
                     .padding(.top, -SidePlate.lift)
                     .padding(.bottom, SidePlate.below)
                     .transition(.opacity)
-                    .onChange(of: plateTab == nil, initial: true) { _, empty in plateAsking = empty }
+                    // Only for a tab coming in where the plate asked: one
+                    // that comes with a change of space is just there, as
+                    // Arc's address is, with no glass going out after the slide.
+                    .onChange(of: plateTab == nil, initial: true) { _, empty in plateAsking = empty && !SpacePager.shared.active }
+                    .onChange(of: browser.spaceID) { _, _ in plateAsking = false }
                     .zIndex(1)
                 }
 
