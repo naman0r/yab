@@ -214,8 +214,8 @@ final class SpaceDraft: ObservableObject {
 enum SpaceAnchors {
     fileprivate static let marks = NSHashTable<SpaceAnchor.Mark>.weakObjects()
 
-    static var plus: NSView? { anchor(.plus) }
-    static var dot: NSView? { anchor(.dot) }
+    static var plus: NSView? { anchor(.plus, in: Links.window) }
+    static var dot: NSView? { anchor(.dot, in: Links.window) }
 
     /// The middle of a space's place in the foot's row, in the window.
     static func slotPoint(_ id: UUID) -> NSPoint? {
@@ -233,8 +233,9 @@ enum SpaceAnchors {
         return nil
     }
 
-    private static func anchor(_ kind: SpaceAnchor.Kind) -> NSView? {
-        let window = Links.window
+    /// The newest mark of `kind` on screen in `window`, or in any window
+    /// with none given.
+    static func anchor(_ kind: SpaceAnchor.Kind, in window: NSWindow?) -> NSView? {
         let placed = marks.allObjects.filter { mark in
             guard mark.kind == kind, let at = mark.window, at === window ?? at, !mark.isHiddenOrHasHiddenAncestor,
                   let content = at.contentView else { return false }
@@ -317,9 +318,11 @@ final class SpaceTray: NSView {
     }
 
     /// Two fingers past the last space (NewSpacePlus): the chain from the
-    /// name, in the window, and into the space it makes.
+    /// name, in the window they swiped over, key or not, and into the
+    /// space it makes.
     static func openNamed(_ browser: Browser) {
-        open(browser, at: .name)
+        guard let window = browser.column?.window else { return }
+        open(browser, at: .name, in: window)
     }
 
     /// Tabs held over the capsule (SpaceDrop): the list, as where they go.
@@ -348,12 +351,13 @@ final class SpaceTray: NSView {
     }
 
     private static func open(_ browser: Browser, at step: SpaceDraft.Step, tab taken: Tab? = nil, more: [Tab] = [], carrying: [Tab] = [], own: Bool = false,
-                             editing: Space? = nil, folder: Nest? = nil) {
+                             editing: Space? = nil, folder: Nest? = nil, in place: NSWindow? = nil) {
         // One taken out of its window without leaving, the window's view
         // made anew under it, is no tray: it doesn't stand in a new one's way.
         if shown?.window == nil { shown = nil }
-        guard shown == nil, let window = Links.window, let content = window.contentView,
-              let from = SpaceAnchors.plus?.window === window ? SpaceAnchors.plus : SpaceAnchors.dot else { return }
+        guard shown == nil, let window = place ?? Links.window, let content = window.contentView,
+              let from = SpaceAnchors.anchor(.plus, in: window)?.window === window
+                ? SpaceAnchors.anchor(.plus, in: window) : SpaceAnchors.anchor(.dot, in: window) else { return }
         let active = taken ?? browser.active.flatMap { $0.isBlank || $0.bench ? nil : $0 }
         let tray = SpaceTray(browser: browser, draft: SpaceDraft(prefs: browser.prefs, tab: active, free: browser.freeIcon))
         tray.draft.step = step

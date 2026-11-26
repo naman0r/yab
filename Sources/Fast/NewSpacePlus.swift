@@ -26,9 +26,10 @@ final class NewSpacePlus {
     private weak var owner: Browser?
     private var space: UUID?
     private var fullSince: TimeInterval?
-    /// New Space opened from here, and whether a ring is full now, for
-    /// the tests.
-    private(set) var opened = 0
+    /// The space changed under the fingers: nothing more from this
+    /// gesture, however they go on, until they come down anew.
+    private var spent = false
+    /// Whether a ring is full now, for the tests.
     var armed: Bool { fullSince != nil }
 
     private init() {
@@ -61,6 +62,7 @@ final class NewSpacePlus {
     /// The row `past` points beyond the last space, the fingers' latest
     /// move at `time`.
     func pull(_ past: CGFloat, at time: TimeInterval, browser: Browser) {
+        guard !spent else { return }
         if owner !== browser || space != browser.spaceID { drop() }
         // Never armed where it can't be seen.
         guard past > 0, Self.eligible(browser), let column = browser.column, var band = column.spaceBand(browser) else {
@@ -111,8 +113,20 @@ final class NewSpacePlus {
             state.shown = 0
             state.ring = 0
         }
-        opened += 1
         SpaceTray.openNamed(browser)
+    }
+
+    /// Fingers down anew: whatever the last gesture left goes.
+    func begin() {
+        spent = false
+        drop()
+    }
+
+    /// A change of space: the "+" goes, and the gesture under way, if
+    /// any, brings it in no more.
+    func spend() {
+        spent = true
+        drop()
     }
 
     /// The "+" back out, nothing made.

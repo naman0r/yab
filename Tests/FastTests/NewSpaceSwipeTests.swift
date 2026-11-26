@@ -76,12 +76,17 @@ struct NewSpaceSwipeTests {
         let catcher = SpaceSwipe.Catch(frame: NSRect(x: 0, y: 0, width: 240, height: 650))
         catcher.browser = browser; catcher.column = true
         root.addSubview(catcher)
+        // The space's dot in the foot, where the tray grows from.
+        let dot = SpaceAnchor.Mark(.dot)
+        dot.frame = NSRect(x: 110, y: 12, width: 20, height: 20)
+        root.addSubview(dot)
         column.slide(out: true, animated: false)
         // Where the space's part of the column is, as SwiftUI reports it.
         browser.rowsClip = CGRect(x: 0, y: 120, width: 240, height: 420)
         browser.spaceFloor = 560
         defer {
-            NewSpacePlus.shared.drop()
+            SpaceTray.shown?.leave()
+            NewSpacePlus.shared.begin()
             catcher.removeFromSuperview(); window.close(); browser.letGo()
             browser.dozing?.invalidate(); browser.stuck.timer?.invalidate(); browser.pressure?.cancel()
             browser.prefs.sidebar = old.0; browser.prefs.sideShut = old.1; browser.prefs.usesSpaces = old.2
@@ -94,27 +99,46 @@ struct NewSpaceSwipeTests {
     }
 
     @Test(arguments: [true, false])
-    func aRingHeldFullOpensNewSpaceOnce(still: Bool) throws {
+    func aRingHeldFullOpensTheTrayOnce(still: Bool) throws {
         try world(on: 1, still: still) { w in
-            let before = NewSpacePlus.shared.opened
+            try #require(SpaceTray.shown == nil)
             w.pull(-340)
             #expect(NewSpacePlus.shared.armed)
             #expect(SpaceSwipe.trace.last { $0.hasPrefix("grab") }?.hasPrefix("grab \(!still)") == true, "\(SpaceSwipe.trace)")
             w.send(.ended, after: 0.3)
-            #expect(NewSpacePlus.shared.opened == before + 1)
+            let tray = try #require(SpaceTray.shown, "no tray came up")
+            #expect(tray.window === w.window)
+            #expect(tray.draft.step == .name)
             #expect(!NewSpacePlus.shared.armed)
             // The glide after the lift makes nothing more.
             w.send([], dx: -30, glide: .began)
             w.send([], dx: -20, glide: .changed)
             w.send([], glide: .ended)
-            #expect(NewSpacePlus.shared.opened == before + 1)
+            #expect(SpaceTray.shown === tray)
+        }
+    }
+
+    @Test(arguments: [true, false])
+    func theTrayOpensInTheWindowSwipedOverNotTheKeyOne(still: Bool) throws {
+        try world(on: 1, still: still) { front in
+            let saved = Links.window
+            defer { Links.window = saved }
+            try world(on: 1, still: still) { behind in
+                // The other window is the one in front; the fingers are over
+                // this one, which scrolls without coming forward.
+                Links.window = front.window
+                behind.pull(-340)
+                behind.send(.ended, after: 0.3)
+                let tray = try #require(SpaceTray.shown, "no tray came up")
+                #expect(tray.window === behind.window)
+                #expect(tray.window !== front.window)
+            }
         }
     }
 
     @Test(arguments: [true, false])
     func shortOrQuickOrCancelledOpensNothing(still: Bool) throws {
         try world(on: 1, still: still) { w in
-            let before = NewSpacePlus.shared.opened
             // Short of full, held a long while.
             w.pull(-200)
             #expect(!NewSpacePlus.shared.armed)
@@ -130,14 +154,13 @@ struct NewSpaceSwipeTests {
             w.pull(-340)
             for _ in 0..<6 { w.send(.changed, dx: 10) }
             w.send(.ended, after: 0.3)
-            #expect(NewSpacePlus.shared.opened == before)
+            #expect(SpaceTray.shown == nil)
         }
     }
 
     @Test(arguments: [true, false])
     func aLostGestureIsNotTakenByAnotherWindow(still: Bool) throws {
         try world(on: 1, still: still) { a in
-            let before = NewSpacePlus.shared.opened
             // Filled in one window, its end gone to another desktop.
             a.pull(-340)
             #expect(NewSpacePlus.shared.armed)
@@ -147,7 +170,7 @@ struct NewSpaceSwipeTests {
                 b.pull(-40)
                 #expect(!NewSpacePlus.shared.armed)
                 b.send(.ended, after: 0.3)
-                #expect(NewSpacePlus.shared.opened == before)
+                #expect(SpaceTray.shown == nil)
             }
         }
     }
@@ -155,19 +178,25 @@ struct NewSpaceSwipeTests {
     @Test(arguments: [true, false])
     func aSpaceChangedUnderTheFingersOpensNothing(still: Bool) throws {
         try world(on: 1, still: still) { w in
-            let before = NewSpacePlus.shared.opened
             w.pull(-340)
             #expect(NewSpacePlus.shared.armed)
             // ⌃1 while the fingers hold.
             w.browser.switchSpace(to: w.ids[0])
             #expect(!NewSpacePlus.shared.armed)
             w.send(.ended, after: 0.3)
-            // Spaces turned off while they hold.
+            // ⌃1 and ⌃2 while they hold, then a little further and held:
+            // the same fingers fill nothing again.
+            w.pull(-340)
+            w.browser.switchSpace(to: w.ids[0])
             w.browser.switchSpace(to: w.ids[1])
+            w.send(.changed, dx: -5)
+            #expect(!NewSpacePlus.shared.armed)
+            w.send(.ended, after: 0.3)
+            // Spaces turned off while they hold.
             w.pull(-340)
             w.browser.prefs.usesSpaces = false
             w.send(.ended, after: 0.3)
-            #expect(NewSpacePlus.shared.opened == before)
+            #expect(SpaceTray.shown == nil)
         }
     }
 
@@ -176,9 +205,8 @@ struct NewSpaceSwipeTests {
             w.browser.rowsClip = nil
             w.pull(-340)
             #expect(!NewSpacePlus.shared.armed)
-            let before = NewSpacePlus.shared.opened
             w.send(.ended, after: 0.3)
-            #expect(NewSpacePlus.shared.opened == before)
+            #expect(SpaceTray.shown == nil)
         }
     }
 }

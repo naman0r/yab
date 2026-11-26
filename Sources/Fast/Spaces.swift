@@ -766,7 +766,7 @@ extension Browser {
         defer { ColumnSpaceCarry.of(self)?.switched() }
         if !washed { SpacePull.shared.interrupt(in: self) }
         // A ring filled past the last space was for the space it filled on.
-        NewSpacePlus.shared.drop()
+        NewSpacePlus.shared.spend()
         SwitchMeter.start()
         defer { SwitchMeter.mark("done") }
         // A pair still coming together or apart finishes first, in this space.
@@ -1940,7 +1940,7 @@ struct SpaceSwipe: NSViewRepresentable {
         private func lose() {
             // Fingers down anew, here or in another window: a "+" from a
             // gesture whose end went elsewhere goes, and its ring with it.
-            MainActor.assumeIsolated { NewSpacePlus.shared.drop() }
+            MainActor.assumeIsolated { NewSpacePlus.shared.begin() }
             guard owned, sideways == true, !paging, !unpaged, !column else { return }
             MainActor.assumeIsolated { SpacePull.shared.cancel() }
         }
