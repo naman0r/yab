@@ -483,7 +483,10 @@ extension Browser {
             }
             let gone = Set(shutting.map(\.id))
             held.tabs = row
-            held.pairs.removeAll { $0.ids.contains(where: gone.contains) }
+            // A split a closed tab was in is the rest of it, as on screen.
+            held.pairs = held.pairs.compactMap { pair in
+                pair.ids.contains(where: gone.contains) ? pair.with(pair.ids.filter { !gone.contains($0) }) : pair
+            }
             if let active = held.active, gone.contains(active) { held.active = nil }
             parked[space] = held
             writeRow(row, active: held.active, space: space, pairs: held.pairs, now: true)

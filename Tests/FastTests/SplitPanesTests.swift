@@ -344,4 +344,16 @@ struct SplitPanesBrowserTests {
         browser.pairs.append(three)
         #expect(!browser.canPinPair(three))
     }
+
+    /// Duplicate on two stacked: the copies stacked too.
+    @Test func duplicateKeepsTheLayoutOfTwo() async throws {
+        let (browser, id) = window()
+        defer { forget(id) }
+        let tabs = open(browser, 2)
+        let stacked = Pair(first: tabs[0].id, second: tabs[1].id, share: 0.4, arrangement: .stacked)
+        browser.pairs = [stacked]
+        browser.duplicateSplit(stacked)
+        let copy = try #require(browser.pairs.first { !$0.contains(tabs[0].id) })
+        #expect(copy.arrangement == .stacked && copy.share == 0.4 && browser.pairs.count == 2)
+    }
 }

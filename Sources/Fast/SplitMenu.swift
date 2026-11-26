@@ -101,7 +101,7 @@ struct SplitMenu: View {
 
 extension Browser {
     /// Duplicate the two pages using the normal tab duplication, then keep
-    /// the copies together with the original divider position.
+    /// the copies together with the original divider position and layout.
     func duplicateSplit(_ pair: Pair) {
         let halves = pair.ids.compactMap { tab(id: $0) }
         guard pairs.contains(pair), halves.count == 2, halves.allSatisfy({ !$0.isBlank }) else { return }
@@ -109,7 +109,7 @@ extension Browser {
         // The copies alone: `chosen` also counts the tab in front.
         let copies = tabs.filter { gathered.contains($0.id) }
         guard copies.count == 2, copies.allSatisfy({ copy in !halves.contains { $0 === copy } }) else { return }
-        pairs.append(Pair(first: copies[0].id, second: copies[1].id, share: pair.share))
+        pairs.append(Pair(first: copies[0].id, second: copies[1].id, share: pair.share, arrangement: pair.arrangement))
         select(copies[1])
         restage()
         writeSession(now: true)

@@ -2116,8 +2116,11 @@ extension Browser {
             guard !syncedIDs.contains(pair.first) || !syncedIDs.contains(pair.second),
                   pair.first != pair.second, remaining.contains(pair.first), remaining.contains(pair.second),
                   !paired.contains(pair.first), !paired.contains(pair.second) else { continue }
-            paired.formUnion([pair.first, pair.second])
-            newPairs.append(pair)
+            // Its panes past the first two only while no incoming pair has them.
+            let more = pair.more.filter { remaining.contains($0) && !paired.contains($0) }
+            let kept = more == pair.more ? pair : pair.with([pair.first, pair.second] + more) ?? pair
+            paired.formUnion(kept.ids)
+            newPairs.append(kept)
         }
 
         if onScreen {
