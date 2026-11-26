@@ -1109,11 +1109,14 @@ struct SidePlate: View {
     }
 
     static func extensionPlate(in browser: Browser, space: UUID?, tab: Tab?, shown: Bool = true) -> SpacePlateRouting.Plate {
-        guard shown, let tab, !tab.isBlank else { return .init(shown: shown) }
+        // A blank tab, or none, keeps the row as Arc does: dropped, every
+        // pin under it went up a row, and a change of space to or from it
+        // carried the plate and pins with the page.
+        guard shown else { return .init(shown: shown) }
         // Measuring a parked space must not start its extensions.
         let signIn = Extensions.signIn(of: space ?? browser.spaceID)
         let ids: [String]
-        if tab.engineKind == .chromium {
+        if let tab, tab.engineKind == .chromium {
             ids = ChromiumColumn.shared.pinnedIDs(for: tab)
         } else if let loaded = Extensions.all.first(where: { $0.signIn == signIn }) {
             ids = loaded.buttons.filter(\.pinned).map(\.id)
@@ -1247,19 +1250,9 @@ struct SidePlate: View {
 
         VStack(spacing: 0) {
             plate
-            if layout.separate, !tab.isBlank {
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(layout.cell), spacing: layout.gap), count: layout.columns),
-                          spacing: layout.gap) {
-                    ForEach(pinned) { button in
-                        PlatePin(button: button, lit: popped && !fromDoor && popupID == button.id,
-                                 width: layout.cell, plated: true, native: tab.engineKind == .chromium ? tab : nil) {
-                            press(button.id)
-                        }
-                        .modifier(PinnedOrder(button: button, extensions: extensions))
-                    }
-                }
-                .padding(.top, layout.gap)
-                .frame(height: layout.height, alignment: .top)
+            if layout.separate {
+                PinnedRow(layout: layout, pinned: pinned, extensions: extensions, lit: popped && !fromDoor ? popupID : nil,
+                          native: tab.engineKind == .chromium ? tab : nil, press: press)
             }
         }
     }
@@ -1320,49 +1313,9 @@ struct SidePlate: View {
     }
 }
 
-/// The plate as a space's page draws it while the spaces slide to or from
-/// Mail (PagedSpace): the address on its ground, as SidePlate stands with
-/// the pointer away, no doors. Only looked at.
-struct StillPlate: View {
-    let tab: Tab?
-    @Environment(\.tone) private var tone
-
-    var body: some View {
-        let asking = tab?.isBlank ?? true
-        Group {
-            if let tab, !asking {
-                AddressWords.text(tab: tab, tone: tone)
-            } else {
-                Text("Search or type a URL").foregroundStyle(Palette.muted(on: tone))
-            }
-        }
-        .sidebarFont(size: 12.5)
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
-        // No wider than the plate whatever the address: with no least
-        // width the frame took the whole address's, and the page it is on
-        // with it, every row of the page as wide and none of their names
-        // faded until the column's own came back as the row landed.
-        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-        .mask {
-            HStack(spacing: 0) {
-                Rectangle()
-                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
-                    .frame(width: SidePlate.fade)
-            }
-        }
-        .padding(.leading, asking ? PlateGlass.lead : 10)
-        .padding(.trailing, 10) // design: the site's own inset, as SidePlate's
-        .frame(height: SidePlate.height)
-        .overlay(PlateGlass(shown: asking))
-        .background(PlateGround(hovering: false, frosted: false))
-        .clipShape(RoundedRectangle(cornerRadius: SidePlate.corner, style: .continuous))
-    }
-}
-
-/// The plate on a space's page as it slides in (PagedSpace). Its extension
-/// grid stays visible with the pointer outside too, just as in the live
-/// column; only the address's inline doors depend on the pointer.
+/// The plate on a space's page as it slides in (PagedSpace), as the live
+/// column draws it: its extension row with the pointer outside too, only
+/// the address's inline doors depending on the pointer.
 struct PagedPlate: View {
     let browser: Browser
     let tab: Tab?
@@ -1371,20 +1324,14 @@ struct PagedPlate: View {
     @Environment(\.slidePointer) private var pointer
 
     var body: some View {
-        if let pointer, let tab {
-            Pointed(browser: browser, tab: tab, width: width, space: space, pointer: pointer)
+        if let tab {
+            if let pointer {
+                Pointed(browser: browser, tab: tab, width: width, space: space, pointer: pointer)
+            } else {
+                SidePlate(browser: browser, tab: tab, near: false, width: width, space: space)
+            }
         } else {
-            still
-        }
-    }
-
-    /// Draw the grid itself wherever the live column will show one.
-    @ViewBuilder
-    private var still: some View {
-        if let tab, !tab.isBlank {
-            SidePlate(browser: browser, tab: tab, near: false, width: width, space: space)
-        } else {
-            StillPlate(tab: tab)
+            EmptyPlate(browser: browser, space: space)
         }
     }
 
@@ -1396,42 +1343,78 @@ struct PagedPlate: View {
         @ObservedObject var pointer: SlidePointer
 
         var body: some View {
-            if !tab.isBlank {
-                SidePlate(browser: browser, tab: tab, near: pointer.near, width: width, space: space)
-            } else {
-                StillPlate(tab: tab)
+            SidePlate(browser: browser, tab: tab, near: pointer.near, width: width, space: space)
+        }
+    }
+}
+
+/// The column's plate with no tab in front: where the address would be,
+/// asking where to go, ⌘T's field when pressed, and the pinned extensions'
+/// row under it, as with a tab. The pins and rows under it stay where they
+/// were.
+struct EmptyPlate: View {
+    @ObservedObject var browser: Browser
+    var space: UUID? = nil
+    var frosted = false
+    @ObservedObject private var here = ExtensionsHere.shared
+    @Environment(\.tone) private var tone
+    @State private var hovering = false
+
+    var body: some View {
+        let extensions = space.map { Extensions.of(space: $0) } ?? Extensions.of(browser)
+        let pinned = extensions.buttons.filter(\.pinned)
+        let width = browser.prefs.sideWidth
+        let layout = SideExtensionLayout(width: width, count: pinned.count, door: SidePlate.door, margin: SideBar.margin,
+                                         columns: SideBar.pinColumns(pinned.count, width: width), gap: SideBar.pinGap)
+        let popup = ExtensionPopup.shared
+        VStack(spacing: 0) {
+            Button { browser.newTab() } label: {
+                Text("Search or type a URL")
+                    .foregroundStyle(Palette.muted(on: tone))
+                    .sidebarFont(size: 12.5)
+                    .lineLimit(1)
+                    .padding(.leading, PlateGlass.lead)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .frame(height: SidePlate.height)
+            .overlay(PlateGlass(shown: true))
+            .background(PlateGround(hovering: hovering, frosted: frosted))
+            .contentShape(RoundedRectangle(cornerRadius: SidePlate.corner, style: .continuous))
+            .onHover { hovering = $0 }
+            if layout.separate {
+                PinnedRow(layout: layout, pinned: pinned, extensions: extensions,
+                          lit: popup.isShown && !popup.fromDoor ? popup.extensionID : nil) { extensions.press($0) }
             }
         }
     }
 }
 
-/// A door inside the plate: the plate's height less its air, concentric.
-/// The column's plate with no tab in front: where the address would be,
-/// asking where to go, ⌘T's field when pressed. The pins and rows under it
-/// stay where they were.
-struct EmptyPlate: View {
-    @ObservedObject var browser: Browser
-    var frosted = false
-    @Environment(\.tone) private var tone
-    @State private var hovering = false
+/// The pinned extensions in a row of their own under the plate, when more
+/// are pinned than fit in it.
+private struct PinnedRow: View {
+    let layout: SideExtensionLayout
+    let pinned: [Extensions.Button]
+    let extensions: Extensions
+    /// The one whose popup hangs from it.
+    let lit: String?
+    var native: Tab? = nil
+    let press: (String) -> Void
 
     var body: some View {
-        Button { browser.newTab() } label: {
-            Text("Search or type a URL")
-                .foregroundStyle(Palette.muted(on: tone))
-                .sidebarFont(size: 12.5)
-                .lineLimit(1)
-                .padding(.leading, PlateGlass.lead)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(layout.cell), spacing: layout.gap), count: layout.columns),
+                  spacing: layout.gap) {
+            ForEach(pinned) { button in
+                PlatePin(button: button, lit: lit == button.id, width: layout.cell, plated: true, native: native) {
+                    press(button.id)
+                }
+                .modifier(PinnedOrder(button: button, extensions: extensions))
+            }
         }
-        .buttonStyle(.plain)
-        .focusable(false)
-        .frame(height: SidePlate.height)
-        .overlay(PlateGlass(shown: true))
-        .background(PlateGround(hovering: hovering, frosted: frosted))
-        .contentShape(RoundedRectangle(cornerRadius: SidePlate.corner, style: .continuous))
-        .onHover { hovering = $0 }
+        .padding(.top, layout.gap)
+        .frame(height: layout.height, alignment: .top)
     }
 }
 

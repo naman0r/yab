@@ -344,13 +344,19 @@ struct SideBar: View {
 
                 // The address, when nothing over the page has it.
                 if browser.sidePlated, !ColumnKit.cut.contains("plate") {
-                    Group {
+                    // One plate takes the other's place at once: both carry
+                    // the extensions' row, and dissolving them into each
+                    // other on the rows' animation (a change of space)
+                    // flared the row for a frame.
+                    ZStack {
                         if let tab = plateTab {
                             // Still the last turn's answer as it is made.
                             SidePlate(browser: browser, tab: tab, near: near, width: prefs.sideWidth, fromAsking: plateAsking,
                                       frosted: plateFrosted)
+                                .transition(.identity)
                         } else {
                             EmptyPlate(browser: browser, frosted: plateFrosted)
+                                .transition(.identity)
                         }
                     }
                     .padding(.top, -SidePlate.lift)
