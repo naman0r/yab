@@ -660,6 +660,13 @@ extension Browser {
         return order
     }
 
+    /// One space of each set of sign-ins of their own, the first of each:
+    /// what a new space can share instead of the shared ones or its own.
+    var signInPeers: [Space] {
+        var seen = Set<UUID>()
+        return spaces.filter { $0.ownSignIns && seen.insert($0.profileID).inserted }
+    }
+
     /// Whether swiping past the last space makes a new one.
     var canSwipeNewSpace: Bool {
         spacesShown && !blank

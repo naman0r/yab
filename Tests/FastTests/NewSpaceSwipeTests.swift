@@ -25,6 +25,14 @@ struct NewSpaceSwipeTests {
         override var timestamp: TimeInterval { at }
     }
 
+    /// A window that says when it is asked to take the keys, without
+    /// coming onto the screen to do it.
+    private final class KeyWindow: NSWindow {
+        var keyed = 0
+        override var canBecomeKey: Bool { true }
+        override func makeKeyAndOrderFront(_ sender: Any?) { keyed += 1 }
+    }
+
     @MainActor private struct World {
         let browser: Browser
         let catcher: SpaceSwipe.Catch
@@ -64,8 +72,8 @@ struct NewSpaceSwipeTests {
         browser.spaceID = ids[place]
         // Unpaged, the way Reduce Motion goes; paged where the row can be raised.
         SpaceTurn.still = still
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
-                              styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
+                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 650))
         root.wantsLayer = true
@@ -132,6 +140,9 @@ struct NewSpaceSwipeTests {
                 let tray = try #require(SpaceTray.shown, "no tray came up")
                 #expect(tray.window === behind.window)
                 #expect(tray.window !== front.window)
+                // And the keys go there, for its name.
+                #expect((behind.window as? KeyWindow)?.keyed == 1)
+                #expect((front.window as? KeyWindow)?.keyed == 0)
             }
         }
     }
