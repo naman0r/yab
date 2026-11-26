@@ -316,6 +316,12 @@ final class SpaceTray: NSView {
         else { SettingsWindow.shared.showNewSpace(for: browser) }
     }
 
+    /// Two fingers past the last space (NewSpacePlus): the chain from the
+    /// name, in the window, and into the space it makes.
+    static func openNamed(_ browser: Browser) {
+        open(browser, at: .name)
+    }
+
     /// Tabs held over the capsule (SpaceDrop): the list, as where they go.
     static func openCarrying(_ browser: Browser, tabs: [Tab]) {
         guard shown == nil else { return }
